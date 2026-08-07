@@ -1,0 +1,134 @@
+name: CustomerJourney dbt CI
+
+# CAO (Consumer Analytics Orchestration) — AO-style domain monorepo.
+# This workflow is path-filtered to the CustomerJourney domain only
+# (domains/CustomerJourney/**). When a new domain is added under domains/,
+# duplicate this workflow file and update the two `paths:` blocks plus the
+# `working-directory` / DOMAIN value to the new domain folder. Same pattern
+# MESAProductDev/.github/workflows/dbt-ci-cd.yml uses across its 4 projects.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "domains/CustomerJourney/**"
+      - ".sqlfluff"
+      - ".github/workflows/customer_journey_ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "domains/CustomerJourney/**"
+      - ".sqlfluff"
+      - ".github/workflows/customer_journey_ci.yml"
+
+# All jobs run inside the domain folder — the domain is a self-contained dbt
+# project (its own dbt_project.yml, profiles.yml, tools/).
+defaults:
+  run:
+    working-directory: domains/CustomerJourney
+
+jobs:
+  # ── Job 1: Auto-assembly check ─────────────────────────────────────────
+  # Snowflake's server-side dbt runtime gets an EMPTY file-list graph at
+  # compile time, so it CANNOT do this — runs OUTSIDE Snowflake where the
+  # real file list is visible. Fails the PR if a metric file was added to
+  # models/metric_layer/ without regenerating the matching wide_layer/*.sql.
+  auto-assembly-check:
+    name: Wide-Layer Auto-Assembly Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check wide-layer models are in sync with metric_layer/
+        run: python3 tools/generate_wide_layer.py --check
+        # Exit 1 = drift. Fix locally with:
+        #   cd domains/CustomerJourney && python3 tools/generate_wide_layer.py
+        # then commit the regenerated models/wide_layer/*.sql.
+
+  # ── Job 2: CAO Lint Gate ───────────────────────────────────────────────
+  # Runs tools/lint_all.py, NOT raw `sqlfluff lint`. The Python gate wraps
+  # sqlfluff and adds the two things raw sqlfluff cannot do for this project:
+  #   (a) accept Snowflake-only syntax — colon field access (Policy.Policy:Field)
+  #       and multi-field/nested ::OBJECT(Field TYPE, ...) casts — by protecting
+  #       those constructs before sqlfluff parses (raw sqlfluff throws PRS on them);
+  #   (b) enforce the CAO identifier doctrine — ID all-caps, raw source columns
+  #       UPPER_SNAKE, metric aliases PascalCase — which sqlfluff's CP02
+  #       'consistent' policy cannot express (it forces one case per file and
+  #       would semantically rename identifiers, so CP02 is disabled).
+  # No database connection needed: the gate uses the jinja templater, not dbt.
+  # The default working-directory is the domain folder; lint_all.py lives at
+  # the repo root under tools/, so invoke it by relative path from the domain.
+  lint:
+    name: CAO Lint Gate
+    runs-on: ubuntu-latest
+    needs: auto-assembly-check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install linting dependencies
+        run: pip install "sqlfluff>=2.0.0,<4.0.0"
+      - name: CAO lint gate (colons/OBJECT-safe + identifier doctrine)
+        run: python3 ../../tools/lint_all.py --domain CustomerJourney
+
+  # ── Job 3: dbt Compile ─────────────────────────────────────────────────
+  # Validates Jinja + the DAG (ref()/source() resolution, no circular refs,
+  # no missing models) WITHOUT touching Snowflake. dbt parse/compile needs a
+  # profiles.yml but not a live warehouse connection for graph validation.
+  compile:
+    name: dbt Compile
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dbt
+        run: pip install "dbt-core<2.0" "dbt-snowflake<2.0"
+      - name: dbt parse (validates Jinja + DAG references)
+        env:
+          DBT_PROFILES_DIR: .
+        run: dbt parse --profiles-dir .
+
+  # ── Job 4: Deploy + Build (Snowflake) ──────────────────────────────────
+  # This is the ONLY job that touches Snowflake. Runs on merge to main.
+  # Uses --temporary-connection (env-var driven) — NOT a named profile,
+  # which doesn't exist on a fresh CI runner. Secrets supply the password.
+  #
+  # GATED OFF until the Snowflake connection is reachable from GitHub's
+  # runner IPs (IP allowlist / network policy). Flip `if: false` to
+  # `if: github.ref == 'refs/heads/main'` once connectivity is confirmed.
+  deploy:
+    name: Deploy + Build to Snowflake
+    runs-on: ubuntu-latest
+    needs: compile
+    if: false   # <-- enable when Snowflake is reachable from CI runners
+    env:
+      SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}
+      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Snowflake CLI
+        run: pip install snowflake-cli-labs
+      - name: Deploy DBT PROJECT
+        run: |
+          snow dbt deploy customer_journey \
+            --temporary-connection \
+            --source . \
+            --dbt-version 1.11.11
+      - name: Execute build
+        run: |
+          snow dbt execute customer_journey \
+            --temporary-connection \
+            build --target dev

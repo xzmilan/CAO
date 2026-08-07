@@ -1,0 +1,64 @@
+version: 2
+
+models:
+  - name: IsZipChangeEvent
+    description: |
+      ## Purpose
+      1 if the change event is a ZIP-5 change, else 0.
+      Event grain (1:1) — every event emits a row.
+      ## Business Rules
+      THE single source of the ZIP discriminator (EventType = 'ZIP_CHANGE').
+      Policy-grain rollups (NumberOfZipChangeEvents etc.) SUM this flag —
+      they never re-filter on EventType.
+      ZIP-5 only (RESDC_ZIP_5_CD); ZIP+4 carries mail-routing noise.
+      JO rule (MoveJourney.csv): ZIP change is the sanctioned proxy for
+      'customer has moved' until the SRM/APEX/CSS Move indicator exists.
+    meta:
+      business_steward: "Edgar Lattuada"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "change_event"
+    columns:
+      - name: ID
+        tests: [not_null, unique]
+
+  - name: IsAgentChangeEvent
+    description: |
+      ## Purpose
+      1 if the change event is an agent-of-record change, else 0.
+      Event grain (1:1) — every event emits a row.
+      ## Business Rules
+      THE single source of the agent-change discriminator
+      (EventType = 'AGENT_CHANGE'). Policy-grain rollups SUM this flag.
+      Future: company- vs customer-initiated split lands HERE (book-of-business
+      transfer flag) — downstream rollups change one JOIN, not their logic.
+      JO focus (AgencyChange.csv, Jessica Campbell): company-initiated changes
+      (agent retirement / book sale); 30–45 day book-access gap is the churn driver.
+    meta:
+      business_steward: "Jessica Campbell"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "change_event"
+    columns:
+      - name: ID
+        tests: [not_null, unique]
+
+  - name: InForce90DaysAfterChangeFlag
+    description: |
+      ## Purpose
+      1 if the policy was still in force 90 days after THIS change event,
+      else 0. Event grain (1:1) — every event emits a row.
+      ## Business Rules
+      Compares event EffectiveDate against PolicyRaw cancellation:
+      in force = CancellationDate IS NULL OR DATEDIFF(event, cancellation) > 90.
+      Composed multiplicatively with IsZip/IsAgent flags in policy rollups.
+      JO rule (MoveJourney.csv): retention measured from the move/change
+      date + 90 days — this flag IS that rule at event grain.
+    meta:
+      business_steward: "Edgar Lattuada"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "change_event"
+    columns:
+      - name: ID
+        tests: [not_null, unique]

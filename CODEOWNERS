@@ -1,0 +1,21 @@
+# CODEOWNERS — who must approve changes before merge to main.
+#
+# Only takes effect when branch protection (Settings → Branches → main) has
+# "Require review from Code Owners" enabled. Without that GitHub-side setting
+# this file is advisory only and does NOT block merges.
+#
+# Format:  <path-pattern>  <owner1> <owner2> ...
+# Later, more-specific rules override earlier general ones.
+# Replace @xzmilan with the real GitHub username/team as the platform grows.
+
+# Default owner for everything.
+*  @xzmilan
+
+# Each domain is owned explicitly — add a line per new domain under domains/.
+/domains/CustomerJourney/  @xzmilan
+
+# The CI pipeline — changes to what gates a merge are high-risk.
+/.github/workflows/  @xzmilan
+
+# Shared lint rules — loosening a rule here weakens every domain's PR gate.
+/.sqlfluff  @xzmilan

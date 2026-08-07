@@ -1,0 +1,35 @@
+name: customer_journey
+version: '1.0.0'
+config-version: 2
+profile: customer_journey
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+
+seeds:
+  customer_journey:
+    seed_policy:
+      +schema: RAW_POLICY
+    seed_policy_change_event:
+      +schema: RAW_CHANGE_EVENT
+
+models:
+  customer_journey:
+    raw_layer:
+      +materialized: table
+      Policy:
+        +schema: RAW_POLICY
+      ChangeEvent:
+        +schema: RAW_CHANGE_EVENT
+    metric_layer:
+      +materialized: table
+      Policy_Metrics:
+        +schema: METRICS_POLICY
+      ChangeEvent_Metrics:
+        +schema: METRICS_CHANGE_EVENT
+    wide_layer:
+      +materialized: table
+      +schema: WIDE
+    view_layer:
+      +materialized: view
+      +schema: VIEWS

@@ -1,0 +1,64 @@
+version: 2
+
+models:
+  - name: PolicyRaw
+    description: |
+      ## Purpose
+      RAW ENTITY: Policy — full policy definition at one row per policy.
+      Sole reader of the RTEN transaction and FWS snapshot mirrors; nothing
+      downstream reads those tables.
+
+      ## Business Rules
+      - ID = BASE64_ENCODE(SHA2(PLCY_CNTRCT_NUM, 256)) — hashed surrogate key.
+      - 1:1 enrichment at top level (typed, label-aliased business attributes).
+      - 1:many detail (MonthlySnapshots) nested as typed ARRAY of OBJECTs —
+        consumers FLATTEN when they need month grain.
+      - System IDs in a typed OBJECT (SystemIds) — dot-access with quoted keys,
+        never bare natural keys downstream.
+      - Latest transaction quarantined via ROW_NUMBER per policy (EFF_DT,
+        SRC_TRANS_TMSP tiebreak).
+    meta:
+      business_steward: "TBD"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "policy"
+      entity: "Policy"
+    columns:
+      - name: ID
+        description: Hashed surrogate key — BASE64_ENCODE(SHA2(PLCY_CNTRCT_NUM, 256)). The only downstream-legal join key.
+        tests:
+          - not_null
+          - unique
+
+  - name: ChangeEventRaw
+    description: |
+      ## Purpose
+      RAW ENTITY: ChangeEvent — one row per policy change event
+      (ZIP_CHANGE or AGENT_CHANGE), detected via LAG over the RTEN
+      transaction mirror. THE CONTRACT for all change-event data.
+
+      ## Business Rules
+      - ID = BASE64_ENCODE(SHA2(PLCY_CNTRCT_NUM|EventType|EFF_DT|SRC_TRANS_TMSP, 256)).
+      - Event grain is FIRST-CLASS: policy context denormalized 1:1 at build
+        time (still 1 row per event).
+      - Downstream consumers NEVER FLATTEN and NEVER read the transaction table.
+      - ZIP detection on RESDC_ZIP_5_CD (never ZIP+4 — mail-routing noise).
+      - AGENT detection on AGT_OF_RECRD_NUM LAG comparison.
+      - Policy link carried in OBJECT(ID) — join via Policy:ID::VARCHAR.
+    meta:
+      business_steward: "TBD"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "change_event"
+      entity: "ChangeEvent"
+    columns:
+      - name: ID
+        description: Hashed event surrogate key over natural key PLCY_CNTRCT_NUM|EventType|EFF_DT|SRC_TRANS_TMSP.
+        tests:
+          - not_null
+          - unique
+      - name: EventType
+        description: Event discriminator — ZIP_CHANGE or AGENT_CHANGE (nested in ChangeEvent OBJECT; column-level tests unsupported for OBJECT fields. See data test in tests/)
+          - unique
+      - name: EventType
+        description: Event discriminator — ZIP_CHANGE or AGENT_CHANGE (nested in ChangeEvent OBJECT; column-level tests unsupported for OBJECT fields)

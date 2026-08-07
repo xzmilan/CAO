@@ -1,0 +1,198 @@
+version: 2
+
+models:
+  - name: InForce90Flag
+    description: |
+      ## Purpose
+      1 if the policy was still in force 90 days after inception, else 0.
+      Policy grain (1:1). Anchor retention signal for all 90-day measures.
+      ## Business Rules
+      In force = CancellationDate IS NULL OR DATEDIFF(inception, cancellation) > 90.
+      Tenure anchor is PLCY_INCEPT_DT (original inception ever), NOT current-term start.
+      JO rule (all three onboarding sheets): 90-day retention is measured from
+      the NEW BUSINESS policy inception date — this flag IS that rule at policy grain.
+    meta:
+      business_steward: "Kim Baker"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "policy"
+    columns:
+      - name: ID
+        tests: [not_null, unique]
+
+  - name: TermType
+    description: |
+      ## Purpose
+      NB/RB term classification per policy (policy grain, 1:1).
+      ## Business Rules
+      Source of truth is FDR PRIOR_PLCY: NULL = New Business.
+      Replaces the broken DATEDIFF-based NB/RB rule.
+    meta:
+      business_steward: "TBD"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "policy"
+    columns:
+      - name: ID
+        tests: [not_null, unique]
+
+  - name: InceptionMonth
+    description: |
+      ## Purpose
+      Policy inception month (YYYY-MM) per policy — cohort anchor for
+      onboarding scorecards (F04). Policy grain (1:1).
+    meta:
+      business_steward: "TBD"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "policy"
+    columns:
+      - name: ID
+        tests: [not_null, unique]
+
+  - name: TenureDays
+    description: |
+      ## Purpose
+      Days from original inception (PLCY_INCEPT_DT) to cancellation or
+      current date. Policy grain (1:1).
+      ## Business Rules
+      DATEDIFF('day', inception, COALESCE(cancellation, CURRENT_DATE)).
+      Never bare date subtraction (Snowflake typing).
+    meta:
+      business_steward: "TBD"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "policy"
+    columns:
+      - name: ID
+        tests: [not_null, unique]
+
+  - name: NumberOfPoliciesInForce
+    description: |
+      ## Purpose
+      Count of monthly snapshots where the policy was in force >90 days
+      past inception, rolled to policy grain (1:1).
+      ## Business Rules
+      SUM over FLATTENed MonthlySnapshots: snapshot counts when
+      CancellationDate IS NULL OR tenure-at-snapshot > 90 days.
+    meta:
+      business_steward: "TBD"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "policy"
+    columns:
+      - name: ID
+        tests: [not_null, unique]
+
+  - name: NumberOfZipChangeEvents
+    description: |
+      ## Purpose
+      Count of ZIP_CHANGE events per policy, rolled to policy grain (1:1).
+      Every policy emits a row, zero-filled.
+      ## Business Rules
+      SUM of the event-grain IsZipChangeEvent flag — no re-filtering, no WHERE.
+      The discriminator lives in IsZipChangeEvent; this metric composes it.
+    meta:
+      business_steward: "TBD"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "policy"
+      contract_item: "4d"
+    columns:
+      - name: ID
+        tests: [not_null, unique]
+      - name: NumberOfZipChangeEvents
+        tests:
+          - not_null
+
+  - name: NumberOfAgentChangeEvents
+    description: |
+      ## Purpose
+      Count of AGENT_CHANGE events per policy, rolled to policy grain (1:1).
+      Every policy emits a row, zero-filled.
+      ## Business Rules
+      SUM of the event-grain IsAgentChangeEvent flag — no re-filtering, no WHERE.
+      Company- vs customer-initiated split pending book-of-business transfer
+      discriminator (not available in rten_dim_pl_trn_xlob).
+    meta:
+      business_steward: "TBD"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "policy"
+      contract_item: "4e"
+    columns:
+      - name: ID
+        tests: [not_null, unique]
+      - name: NumberOfAgentChangeEvents
+        tests:
+          - not_null
+
+  - name: NumberOfMovedPoliciesInForce90Days
+    description: |
+      ## Purpose
+      Count of ZIP-change events whose policy was still in force 90 days
+      post-change, rolled to policy grain (1:1), zero-filled.
+      ## Business Rules
+      SUM of event-grain flags (IsZipChangeEvent × InForce90DaysAfterChangeFlag).
+    meta:
+      business_steward: "TBD"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "policy"
+      contract_item: "4d"
+    columns:
+      - name: ID
+        tests: [not_null, unique]
+
+  - name: NumberOfAgentChangePoliciesInForce90Days
+    description: |
+      ## Purpose
+      Count of agent-change events whose policy was still in force 90 days
+      post-change, rolled to policy grain (1:1), zero-filled.
+      ## Business Rules
+      SUM of event-grain flags (IsAgentChangeEvent × InForce90DaysAfterChangeFlag).
+    meta:
+      business_steward: "TBD"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "policy"
+      contract_item: "4e"
+    columns:
+      - name: ID
+        tests: [not_null, unique]
+
+  - name: MovedPolicyRetentionRate90Days
+    description: |
+      ## Purpose
+      Share of a policy's ZIP-change events that remained in force 90 days
+      post-change. Policy grain (1:1); NULL for policies with no moves.
+      ## Business Rules
+      AVG of IsZipChangeEvent × InForce90DaysAfterChangeFlag over the policy's
+      ZIP events (WHERE IsZipChangeEvent = 1).
+    meta:
+      business_steward: "TBD"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "policy"
+      contract_item: "4d"
+    columns:
+      - name: ID
+        tests: [not_null, unique]
+
+  - name: AgentChangeRetentionRate90Days
+    description: |
+      ## Purpose
+      Share of a policy's agent-change events that remained in force 90 days
+      post-change. Policy grain (1:1); NULL for policies with no agent changes.
+      ## Business Rules
+      AVG of IsAgentChangeEvent × InForce90DaysAfterChangeFlag over the policy's
+      agent-change events (WHERE IsAgentChangeEvent = 1).
+    meta:
+      business_steward: "TBD"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "policy"
+      contract_item: "4e"
+    columns:
+      - name: ID
+        tests: [not_null, unique]

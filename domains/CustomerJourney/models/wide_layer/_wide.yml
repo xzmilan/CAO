@@ -1,0 +1,38 @@
+version: 2
+
+models:
+  - name: PolicyWide
+    description: |
+      ## Purpose
+      WIDE LAYER: Policy wide table — one OBJECT column per relation
+      (PolicyRaw + each of the 11 Policy metrics).
+      ## Business Rules
+      Auto-assembly: OBJECT_CONSTRUCT_KEEP_NULL(Relation.*); metric OBJECTs
+      carry the measure only (join key stripped via OBJECT_DELETE(..., 'ID')).
+      No combiner, no explicit column list — new metric fields auto-flow.
+      Owner: CI/CD (do not hand-edit). INNER JOINs — every policy carries
+      every metric (zero-fill contract).
+      ## Consumer Access
+      PolicyWide.Policy:<Field> / PolicyWide.<MetricName>:<MetricName> / ...
+    meta:
+      business_steward: "TBD"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "policy"
+
+  - name: ChangeEventWide
+    description: |
+      ## Purpose
+      WIDE LAYER: ChangeEvent wide table — one OBJECT column per relation
+      (ChangeEventRaw + the 3 ChangeEvent metrics).
+      ## Business Rules
+      Same auto-assembly pattern as PolicyWide. LEFT JOINs — every event
+      carries its flags regardless of metric coverage.
+      Owner: CI/CD (do not hand-edit).
+      ## Consumer Access
+      ChangeEventWide.ChangeEvent:<Field> / ChangeEventWide.IsZipChangeEvent:IsZipChangeEvent / ...
+    meta:
+      business_steward: "TBD"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "change_event"

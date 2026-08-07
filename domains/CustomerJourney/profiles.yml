@@ -1,0 +1,12 @@
+customer_journey:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: 'not needed'
+      user: 'not needed'
+      database: CUSTOMER_JOURNEYS
+      schema: JOURNEY
+      warehouse: COMPUTE_WH
+      role: ACCOUNTADMIN
+      threads: 8

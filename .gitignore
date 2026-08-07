@@ -1,0 +1,29 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# dbt
+target/
+dbt_packages/
+dbt_modules/
+logs/
+*.duckdb
+.user.yml
+
+# OS
+.DS_Store
+
+# Env / secrets — never commit real credentials
+.env
+.env.*
+!.env.example
+secrets.toml
+*.pem
+*.key
+
+# Editors
+.vscode/
+.idea/
