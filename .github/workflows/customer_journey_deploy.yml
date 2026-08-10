@@ -1,0 +1,66 @@
+name: CustomerJourney dbt Deploy
+
+# CAO (Consumer Analytics Orchestration) — Snowflake deploy/build workflow.
+# SEPARATE from the PR-gating workflow (customer_journey_ci.yml) so the PR
+# checks never depend on Snowflake secrets that may not be provisioned yet.
+#
+# This is the ONLY workflow that touches Snowflake. It runs on merge to main.
+# It requires a Snowflake SERVICE ACCOUNT (not a personal account), supplied
+# via GitHub Secrets/Variables — see CAO README / handoff docs for setup.
+#
+# ENABLE: this workflow is gated off (`if: false`) until BOTH are true:
+#   1. The Snowflake service account + least-privilege role exist (IT ticket).
+#   2. GitHub runner IPs can reach Farmers Snowflake (IP allowlist / network
+#      policy — same IT ticket).
+# To enable, flip the job's `if: false` to remove the gate, and set the
+# vars/secrets listed in the env: block below.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "domains/CustomerJourney/**"
+      - ".github/workflows/customer_journey_deploy.yml"
+  workflow_dispatch: {}   # allow manual trigger from the Actions tab
+
+defaults:
+  run:
+    working-directory: domains/CustomerJourney
+
+jobs:
+  deploy:
+    name: Deploy + Build to Snowflake
+    runs-on: ubuntu-latest
+    if: false   # <-- remove this line to enable once secrets + network are ready
+    env:
+      # Non-secret config — set as repo Variables (Settings → Secrets and
+      # variables → Actions → Variables tab).
+      SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}          # SVC_CAO_DBT_DEPLOY (service acct)
+      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}          # CAO_DBT_DEPLOYER (least-privilege)
+      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+      # Secret — set as a repo Secret (Actions → Secrets tab). Prefer key-pair
+      # auth over a password when Farmers security allows it.
+      SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Snowflake CLI
+        run: pip install snowflake-cli-labs
+      - name: Deploy DBT PROJECT
+        # --temporary-connection builds the connection from env vars — no named
+        # profile (which wouldn't exist on a fresh CI runner). Verified working
+        # pattern from xzmilan/model_zoo_sf.
+        run: |
+          snow dbt deploy customer_journey \
+            --temporary-connection \
+            --source . \
+            --dbt-version 1.11.11
+      - name: Execute build
+        run: |
+          snow dbt execute customer_journey \
+            --temporary-connection \
+            build --target dev
