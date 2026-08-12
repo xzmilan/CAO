@@ -10,13 +10,10 @@ name: CustomerJourney dbt Deploy
 # It needs a Snowflake SERVICE ACCOUNT (not a personal account), supplied
 # via GitHub Secrets/Variables. See the CAO README for setup steps.
 #
-# Currently gated off (`if: false`) until two things are true:
-#   1. The Snowflake service account + least-privilege role exist (IT ticket).
-#   2. GitHub runner IPs can reach Farmers Snowflake (IP allowlist / network
-#      policy — same IT ticket).
-#
-# To enable: remove the `if: false` line below, and set the vars/secrets
-# listed in the env: block.
+# Trial-mode deploy — hardcoded to xzmilan's trial Snowflake account.
+# When Farmers IT provisions the service account + opens the IP allowlist,
+# swap the env: block back to ${{ vars.SNOWFLAKE_* }} / ${{ secrets.SNOWFLAKE_PASSWORD }}
+# and point at the Farmers account/role/warehouse/database.
 
 on:
   push:
@@ -32,31 +29,26 @@ defaults:
 
 jobs:
   deploy:
-    name: Deploy + Build to Snowflake
+    name: Deploy + Build to Snowflake (Trial)
     runs-on: ubuntu-latest
-    if: false   # <-- remove this line to enable once secrets + network are ready
     env:
-      # Non-secret config — set as repo Variables (Settings → Secrets and
-      # variables → Actions → Variables tab).
-      SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
-      SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}          # SVC_CAO_DBT_DEPLOY (service acct)
-      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}          # CAO_DBT_DEPLOYER (least-privilege)
-      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
-      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
-      # Secret — set as a repo Secret (Actions → Secrets tab). Prefer key-pair
-      # auth over a password when Farmers security allows it.
+      SNOWFLAKE_ACCOUNT: RDCAAHU-BL07485
+      SNOWFLAKE_USER: xzmilan
+      SNOWFLAKE_ROLE: ACCOUNTADMIN
+      SNOWFLAKE_WAREHOUSE: COMPUTE_WH
+      SNOWFLAKE_DATABASE: MZ_SF
       SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Create CUSTOMERJOURNEY schema if needed
+        run: |
+          snow sql --temporary-connection -q "CREATE SCHEMA IF NOT EXISTS MZ_SF.CUSTOMERJOURNEY"
       - name: Install Snowflake CLI
         run: pip install snowflake-cli-labs
       - name: Deploy DBT PROJECT
-        # --temporary-connection builds the connection from env vars — no named
-        # profile (which wouldn't exist on a fresh CI runner). Verified working
-        # pattern from xzmilan/model_zoo_sf.
         run: |
           snow dbt deploy customer_journey \
             --temporary-connection \
