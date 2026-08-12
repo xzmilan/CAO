@@ -53,9 +53,13 @@ jobs:
           snow dbt deploy customer_journey \
             --temporary-connection \
             --source . \
+            --database MZ_SF \
+            --schema CUSTOMERJOURNEY \
             --dbt-version 1.11.11
       - name: Execute build
         run: |
           snow dbt execute customer_journey \
             --temporary-connection \
+            --database MZ_SF \
+            --schema CUSTOMERJOURNEY \
             build --target dev
