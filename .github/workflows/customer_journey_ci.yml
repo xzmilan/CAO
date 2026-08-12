@@ -47,6 +47,16 @@ jobs:
   # Fix locally:
   #   cd domains/CustomerJourney && python3 tools/generate_wide_layer.py
   # then commit the regenerated models/wide_layer/*.sql.
+  auto-assembly-check:
+    name: Wide-Layer Auto-Assembly Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify wide layer matches metric files
+        run: python3 tools/generate_wide_layer.py --check
 
   # ── Job 2: CAO Lint Gate ───────────────────────────────────────────────
   # Runs lint_all.py, NOT raw `sqlfluff lint`. The Python wrapper does two
