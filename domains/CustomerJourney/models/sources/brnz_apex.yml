@@ -1,0 +1,59 @@
+# =============================================================================
+# brnz_apex.yml — APEX raw (bronze) source declaration
+# See fdr.yml's header for how these files work. The VIEW TRAP warning lives
+# in the source description below so it renders in dbt docs.
+# =============================================================================
+version: 2
+
+sources:
+  - name: brnz_apex
+    database: PRD_BRNZ_RAW
+    schema: PRD_BRNZ_APEX
+    description: |
+      Raw APEX (Salesforce) base tables in the bronze layer.
+
+      ⚠ THE VIEW TRAP — READ THIS BEFORE QUERYING APEX DATA:
+      There is a view at PRD_BIZPROD_DIRECT_BU.STG_APEX.STG_APEX__CONTACTS
+      that looks convenient. Do NOT use it. It sits on top of ~1.76 BILLION
+      underlying rows (~391 GB) with dedup logic, and queries against it
+      hang. Always read the raw base tables declared here instead —
+      same data, no dedup overhead.
+    meta:
+      owner: "Salesforce/apex data platform"
+    tables:
+      - name: contact
+        description: |
+          APEX Contact base table — one row per Salesforce contact.
+          This is the agent/customer contact identity data (names, emails,
+          phones, mailing addresses).
+        columns:
+          - name: ID
+            description: |
+              Salesforce Contact ID (starts with 003...). Unique per contact.
+            meta:
+              declared_because: "tested"
+            tests:
+              - not_null
+              - unique
+          - name: ACCOUNTID
+            description: |
+              Salesforce Account ID (starts with 001...) — the household/
+              account this contact belongs to. How this maps to policy
+              numbers is under diagnosis — see
+              docs/JODataNeeds/DiagnosisFiles/DIAGNOSE_agent_contacts_join.sql.
+            meta:
+              declared_because: "usage_rule"
+          - name: PREFERRED_PHONE_NUMBER_C
+            description: |
+              Contact's preferred phone number (custom Salesforce field —
+              the standard PHONE field isn't the populated one).
+              Fallback join key if no direct ID mapping to policies exists.
+            meta:
+              declared_because: "usage_rule"
+          - name: EMAIL
+            description: |
+              Contact's email (standard Salesforce field). Fallback join key.
+              Verified 2026-08-12: 1.25M of 37.4M ContactSpace phone outcomes
+              match an APEX contact on this field.
+            meta:
+              declared_because: "usage_rule"

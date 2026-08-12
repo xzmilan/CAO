@@ -62,3 +62,62 @@ models:
           - unique
       - name: EventType
         description: Event discriminator — ZIP_CHANGE or AGENT_CHANGE (nested in ChangeEvent OBJECT; column-level tests unsupported for OBJECT fields)
+
+  - name: SurveyRaw
+    description: |
+      ## Purpose
+      RAW ENTITY: Survey — one row per survey campaign/invite wave.
+      Responses nested as typed ARRAY of OBJECTs. THE CONTRACT for all
+      survey data (Qualtrics: agent change, new business, renewal,
+      RNPS, CSS CES).
+
+      ## Business Rules
+      - ID = BASE64_ENCODE(SHA2(SurveyType|InviteWave, 256)).
+      - Campaign grain: 1 row per survey type + invite month.
+      - 1:many Responses nested as ARRAY — consumers FLATTEN when they need
+        response grain.
+      - System IDs in typed OBJECTs (SystemIds) — never bare natural keys.
+      - Agent change details (meets needs, received letter, days without agent)
+        in typed OBJECT (AgentChangeDetails).
+    meta:
+      business_steward: "TBD"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "survey_campaign"
+      entity: "Survey"
+    columns:
+      - name: ID
+        description: Hashed surrogate key over natural key SurveyType|InviteWave.
+        tests:
+          - not_null
+          - unique
+
+  - name: ContactRaw
+    description: |
+      ## Purpose
+      RAW ENTITY: Contact — one row per contact identity (APEX contact).
+      Contact events nested as typed ARRAY of OBJECTs. THE CONTRACT
+      for all contact data (ContactSpace phone, SMS, email).
+      NEVER reads the STG_APEX view (1.76B-row dedup trap) — reads
+      PRD_BRNZ_APEX.CONTACT directly.
+
+      ## Business Rules
+      - ID = BASE64_ENCODE(SHA2(ApexContactId, 256)).
+      - Identity grain: 1 row per APEX contact.
+      - 1:many ContactEvents nested as ARRAY — consumers FLATTEN when they need
+        event grain.
+      - Contact sources tracked in typed OBJECT (ContactSources).
+      - Join from contact events to identity is TBD pending diagnosis
+        (FFQ_QUOTE_ID → policy, or phone/email fallback).
+    meta:
+      business_steward: "TBD"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "contact_identity"
+      entity: "Contact"
+    columns:
+      - name: ID
+        description: Hashed surrogate key over natural key ApexContactId.
+        tests:
+          - not_null
+          - unique

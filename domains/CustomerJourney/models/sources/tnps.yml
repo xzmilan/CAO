@@ -1,0 +1,74 @@
+# =============================================================================
+# tnps.yml — TNPS invite tracking source declaration
+# See fdr.yml's header for how these files work. The why-invites-matter
+# explanation lives in the source description below.
+# =============================================================================
+version: 2
+
+sources:
+  - name: tnps
+    database: PRD_BIZDB_PL_MARKETING
+    schema: TNPS
+    description: |
+      Transactional NPS invite/campaign tracking — who was sent which
+      survey, and when.
+
+      WHY INVITES MATTER:
+      The Qualtrics tables tell you who RESPONDED. These tables tell you who
+      was INVITED. Response rate = responses / invites — you can't compute it
+      without this side of the data. SurveyRaw joins these to the Qualtrics
+      responses to build the campaign-grain entity.
+    meta:
+      owner: "Marketing analytics (NPS program)"
+    tables:
+      - name: agtchg_invites_sent
+        description: |
+          Agent change survey invites — one row per customer invited to
+          take the agent change survey. 399.5K rows.
+        columns:
+          - name: POLICY_NUMBER
+            description: |
+              Policy number of the invited customer — this is how invites
+              join to Qualtrics responses (POLICY_NUMBER_1) and to PolicyRaw.
+            meta:
+              declared_because: "join_key"
+          - name: INVITE_PULL_DATE
+            description: |
+              When the invite batch was pulled/sent. SurveyRaw truncates
+              this to month to define the campaign wave.
+            meta:
+              declared_because: "usage_rule"
+
+      - name: nb_invites_sent
+        description: |
+          New business survey invites — one row per customer invited to
+          take the new business onboarding survey. 1.2M rows.
+        columns:
+          - name: POLICY_NUMBER
+            description: |
+              Policy number of the invited customer — join key to responses
+              and PolicyRaw.
+            meta:
+              declared_because: "join_key"
+          - name: INVITE_PULL_DATE
+            description: |
+              When the invite batch was pulled/sent.
+            meta:
+              declared_because: "usage_rule"
+
+      - name: renewal_invites_sent
+        description: |
+          Renewal survey invites — one row per customer invited to take
+          the renewal survey. 9.8M rows (the largest invite pool).
+        columns:
+          - name: POLICY_NUMBER
+            description: |
+              Policy number of the invited customer — join key to responses
+              and PolicyRaw.
+            meta:
+              declared_because: "join_key"
+          - name: INVITE_PULL_DATE
+            description: |
+              When the invite batch was pulled/sent.
+            meta:
+              declared_because: "usage_rule"

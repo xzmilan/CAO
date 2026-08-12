@@ -1,0 +1,180 @@
+# =============================================================================
+# qualtrics.yml — Qualtrics survey source declaration
+# See fdr.yml's header for how these files work. The join-key naming
+# inconsistency warning lives in the source description below.
+# =============================================================================
+version: 2
+
+sources:
+  - name: qualtrics
+    database: PRD_BIZDB_PL_MARKETING
+    schema: QUALTRICS
+    description: |
+      Qualtrics survey response tables. One table per survey type.
+      Each row = one completed survey response from one customer.
+
+      THE BIG PICTURE:
+      Every JO journey asks for survey metrics (tNPS, CSAT, CES, rNPS). Those
+      all live here. The SurveyRaw entity unions these tables into one
+      campaign-grain entity — you should never need to read these directly.
+
+      JOINING TO POLICIES:
+      Most tables use POLICY_NUMBER_1 as the policy join key. The CSS CES
+      table uses POLICYNUMBER (no underscore) instead — same concept,
+      different column name. Watch for that when writing joins.
+    meta:
+      owner: "Marketing analytics (Qualtrics feed)"
+    tables:
+      - name: agentchange_responses
+        description: |
+          Agent change survey — sent to customers whose agent of record
+          changed (company-initiated, e.g. agent retired or sold their book).
+          19.6K rows. Powers the Agency Change journey's CSAT metrics.
+        columns:
+          - name: RESPONSEID
+            description: |
+              Qualtrics response ID — unique per completed survey.
+            meta:
+              declared_because: "tested"
+            tests:
+              - not_null
+              - unique
+          - name: POLICY_NUMBER_1
+            description: |
+              Policy number — the join key to PolicyRaw.
+            meta:
+              declared_because: "join_key"
+          - name: AGENT_ID
+            description: |
+              Agent ID at the time of the survey.
+            meta:
+              declared_because: "usage_rule"
+          - name: Q1
+            description: |
+              The NPS question (0-10 scale). This is the score behind every
+              "Agent Change CSAT" number.
+            meta:
+              declared_because: "usage_rule"
+          - name: MEET_NEEDS
+            description: |
+              "Does the new agent meet your needs?" Y/N — one of the specific
+              Agency Change journey metrics.
+            meta:
+              declared_because: "usage_rule"
+          - name: RCVD_FARMERS_LETTER
+            description: |
+              "Did you receive a letter from Farmers about the change?" Y/N —
+              feeds the "% customers receiving no comms" metric (invert it).
+            meta:
+              declared_because: "usage_rule"
+          - name: NUM_DAYS_NO_AGENT
+            description: |
+              Days the customer was without an agent during the transition.
+              This is the "avg cycle time for getting policies re-assigned"
+              metric the Agency Change journey asks for.
+            meta:
+              declared_because: "usage_rule"
+
+      - name: newbus_responses
+        description: |
+          New business onboarding survey — sent after a new policy is written.
+          71.5K rows. Powers the onboarding journeys' tNPS/CSAT metrics.
+        columns:
+          - name: RESPONSEID
+            description: |
+              Qualtrics response ID — unique per completed survey.
+            meta:
+              declared_because: "tested"
+            tests:
+              - not_null
+              - unique
+          - name: POLICY_NUMBER_1
+            description: |
+              Policy number — the join key to PolicyRaw.
+            meta:
+              declared_because: "join_key"
+          - name: Q1
+            description: |
+              The NPS question (0-10 scale) — onboarding tNPS.
+            meta:
+              declared_because: "usage_rule"
+
+      - name: renewal_responses
+        description: |
+          Renewal survey — sent around renewal time. 317.9K rows.
+          Powers the Renewal journey's tNPS metric.
+        columns:
+          - name: RESPONSEID
+            description: |
+              Qualtrics response ID — unique per completed survey.
+            meta:
+              declared_because: "tested"
+            tests:
+              - not_null
+              - unique
+          - name: POLICY_NUMBER_1
+            description: |
+              Policy number — the join key to PolicyRaw.
+            meta:
+              declared_because: "join_key"
+          - name: Q1
+            description: |
+              The NPS question (0-10 scale) — renewal tNPS.
+            meta:
+              declared_because: "usage_rule"
+
+      - name: rnps_responses
+        description: |
+          Relationship NPS (rNPS) survey — the big periodic relationship
+          survey. 529.3K rows. Powers the Move journey's rNPS metric
+          (match respondents to policies with ZIP-change events).
+          This table is WIDE — it also carries household, agent, and policy
+          enrichment columns (ECN, ENTPRS_HH_NUM, agent info, LOB flags).
+        columns:
+          - name: RESPONSEID
+            description: |
+              Qualtrics response ID — unique per completed survey.
+            meta:
+              declared_because: "tested"
+            tests:
+              - not_null
+              - unique
+          - name: POLICY_NUMBER_1
+            description: |
+              Policy number — the join key to PolicyRaw.
+            meta:
+              declared_because: "join_key"
+          - name: Q1
+            description: |
+              The NPS question (0-10 scale) — relationship NPS.
+            meta:
+              declared_because: "usage_rule"
+
+      - name: farmerscom_css_ces_responses
+        description: |
+          CSS (Customer Self-Service / farmers.com) Customer Effort Score
+          survey — fires after customers use the website. 132.7K rows.
+          Powers the CES metrics in the Move and Renewal journeys.
+          ⚠ The policy join key here is POLICYNUMBER (no underscore) —
+          different from the other tables' POLICY_NUMBER_1.
+        columns:
+          - name: RESPONSEID
+            description: |
+              Qualtrics response ID — unique per completed survey.
+            meta:
+              declared_because: "tested"
+            tests:
+              - not_null
+              - unique
+          - name: POLICYNUMBER
+            description: |
+              Policy number — the join key to PolicyRaw. Note the column
+              name has no underscore (unlike POLICY_NUMBER_1 elsewhere).
+            meta:
+              declared_because: "join_key"
+          - name: Q1R_CES
+            description: |
+              Customer Effort Score (1-7 scale) — "how easy was it to do
+              what you came to do?"
+            meta:
+              declared_because: "usage_rule"
