@@ -43,11 +43,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install Snowflake CLI
+        run: pip install snowflake-cli-labs
       - name: Create CUSTOMERJOURNEY schema if needed
         run: |
           snow sql --temporary-connection -q "CREATE SCHEMA IF NOT EXISTS MZ_SF.CUSTOMERJOURNEY"
-      - name: Install Snowflake CLI
-        run: pip install snowflake-cli-labs
       - name: Deploy DBT PROJECT
         run: |
           snow dbt deploy customer_journey \
