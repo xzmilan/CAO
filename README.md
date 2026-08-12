@@ -1,7 +1,7 @@
 # CAO — Consumer Analytics Orchestration
 
-An AO-style domain monorepo. Each **domain** under `domains/` is a
-self-contained dbt project (its own `dbt_project.yml`, `profiles.yml`,
+A domain monorepo — multiple unrelated dbt projects live under `domains/`,
+each one a self-contained project (its own `dbt_project.yml`, `profiles.yml`,
 `models/`, `tools/`). Shared platform tooling lives at the repo root.
 
 ## Layout

@@ -1,13 +1,21 @@
 name: CustomerJourney dbt CI
 
-# CAO (Consumer Analytics Orchestration) — AO-style domain monorepo.
-# PR-GATING workflow: runs the three checks that must pass before merge.
-# NO Snowflake credentials needed — none of these jobs touch the warehouse
-# (jinja templater, not dbt templater; dbt parse validates the DAG offline).
+# CAO (Consumer Analytics Orchestration) This is a domain monorepo, meaning
+# multiple unrelated dbt projects live under CAO and all the tools we use
+# to test, format, etc can be applied to all domains. We can exclude rules 
+# if needed on specific domains, however some rules should apply to all. 
 #
-# The Snowflake deploy/build lives in a SEPARATE workflow
-# (customer_journey_deploy.yml, push-to-main only) so this PR gate never
-# depends on secrets that may not be provisioned yet.
+# 3 rules that should always be applied. 
+# There are 3 gates that have to pass before a PR will merge. None of them
+# touch Snowflake — the jinja templater catches any DAG issues, dbt parse
+# catches broken ref() and source() references (it validates that every model
+# you reference actually exists in the DAG — so you find out at PR time, not
+# deploy time), and lint_all.py catches style + doctrine violations.
+#
+# The deploy/build to Snowflake lives in a SEPARATE workflow
+# (customer_journey_deploy.yml, push-to-main only). Keeping it separate means
+# this PR gate never depends on secrets that may not be provisioned yet —
+# your PR checks run regardless of whether IT has set up the service account.
 #
 # Path-filtered to the CustomerJourney domain only. When a new domain is added
 # under domains/, duplicate this file and update the `paths:` blocks plus the
@@ -31,36 +39,33 @@ defaults:
 jobs:
   # ── Job 1: Auto-assembly check ─────────────────────────────────────────
   # Snowflake's server-side dbt runtime gets an EMPTY file-list graph at
-  # compile time, so it CANNOT do this — runs OUTSIDE Snowflake where the
-  # real file list is visible. Fails the PR if a metric file was added to
-  # models/metric_layer/ without regenerating the matching wide_layer/*.sql.
-  auto-assembly-check:
-    name: Wide-Layer Auto-Assembly Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Check wide-layer models are in sync with metric_layer/
-        run: python3 tools/generate_wide_layer.py --check
-        # Exit 1 = drift. Fix locally with:
-        #   cd domains/CustomerJourney && python3 tools/generate_wide_layer.py
-        # then commit the regenerated models/wide_layer/*.sql.
+  # compile time, so it CANNOT discover metric files and regenerate the wide
+  # layer — this has to run OUTSIDE Snowflake where the real file list is
+  # visible. If you added a metric to models/metric_layer/ but didn't
+  # regenerate the matching wide_layer/*.sql, this gate fails your PR.
+  #
+  # Fix locally:
+  #   cd domains/CustomerJourney && python3 tools/generate_wide_layer.py
+  # then commit the regenerated models/wide_layer/*.sql.
 
   # ── Job 2: CAO Lint Gate ───────────────────────────────────────────────
-  # Runs tools/lint_all.py, NOT raw `sqlfluff lint`. The Python gate wraps
-  # sqlfluff and adds the two things raw sqlfluff cannot do for this project:
-  #   (a) accept Snowflake-only syntax — colon field access (Policy.Policy:Field)
-  #       and multi-field/nested ::OBJECT(Field TYPE, ...) casts — by protecting
-  #       those constructs before sqlfluff parses (raw sqlfluff throws PRS on them);
-  #   (b) enforce the CAO identifier doctrine — ID all-caps, raw source columns
-  #       UPPER_SNAKE, metric aliases PascalCase — which sqlfluff's CP02
-  #       'consistent' policy cannot express (it forces one case per file and
-  #       would semantically rename identifiers, so CP02 is disabled).
-  # No database connection needed: the gate uses the jinja templater, not dbt.
-  # The default working-directory is the domain folder; lint_all.py lives at
-  # the repo root under tools/, so invoke it by relative path from the domain.
+  # Runs lint_all.py, NOT raw `sqlfluff lint`. The Python wrapper does two
+  # things raw sqlfluff can't:
+  #
+  #   (a) handles Snowflake-only syntax — colon field access
+  #       (Policy.Policy:Field) and multi-field ::OBJECT(Field TYPE, ...)
+  #       casts — by protecting those constructs before sqlfluff parses.
+  #       Raw sqlfluff throws PRS on both of these;
+  #
+  #   (b) enforces the CAO identifier doctrine — ID all-caps, raw source
+  #       columns UPPER_SNAKE, metric aliases PascalCase. sqlfluff's CP02
+  #       'consistent' policy can't express this (it forces one case per
+  #       file and would semantically rename identifiers — it'd turn ID→Id
+  #       or TenureDays→TENUREDAYS — so CP02 is disabled).
+  #
+  # No database connection needed — jinja templater, not dbt. The default
+  # working-directory is the domain folder; lint_all.py lives at the repo
+  # root, so invoke it by relative path from the domain.
   lint:
     name: CAO Lint Gate
     runs-on: ubuntu-latest
@@ -76,9 +81,12 @@ jobs:
         run: python3 ../../tools/lint_all.py --domain CustomerJourney
 
   # ── Job 3: dbt Compile ─────────────────────────────────────────────────
-  # Validates Jinja + the DAG (ref()/source() resolution, no circular refs,
-  # no missing models) WITHOUT touching Snowflake. dbt parse/compile needs a
-  # profiles.yml but not a live warehouse connection for graph validation.
+  # Validates Jinja + the DAG WITHOUT touching Snowflake. dbt parse catches
+  # broken ref() and source() calls — it checks that every model you
+  # reference actually exists in the project, that there are no circular
+  # dependencies, and that no model is missing from the graph — so you
+  # don't find out about broken references at deploy time. Needs a
+  # profiles.yml but not a live warehouse connection.
   compile:
     name: dbt Compile
     runs-on: ubuntu-latest
@@ -95,8 +103,9 @@ jobs:
           DBT_PROFILES_DIR: .
         run: dbt parse --profiles-dir .
 
-  # NOTE: the Deploy + Build job is intentionally NOT in this file. It lives in
-  # customer_journey_deploy.yml (push-to-main only) and needs Snowflake service
-  # account secrets. Keeping it separate means this PR gate runs fully with no
-  # secrets provisioned — enable the deploy workflow later when IT provides the
-  # service account, without touching the PR checks.
+  # NOTE: the deploy + build job intentionally lives in a SEPARATE file
+  # (customer_journey_deploy.yml, push-to-main only). It needs Snowflake
+  # service account secrets, so keeping it apart means this PR gate runs
+  # with no secrets provisioned at all — you can enable the deploy workflow
+  # later when IT provides the service account, without touching these
+  # PR checks.

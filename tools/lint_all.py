@@ -2,12 +2,23 @@
 """
 lint_all.py — CAO CI lint gate runner.
 
-Runs lint_snowflake_sql (tools/sql_formatter_snowflake.py) across every model
-file in a domain and exits non-zero if ANY file has a finding. This is the
-authoritative CAO Snowflake lint gate — it accepts colons and ::OBJECT(...)
-casts, enforces the identifier doctrine (ID all-caps / raw UPPER_SNAKE /
-aliases PascalCase) via Python, and runs sqlfluff's CP01/CP03/AL/LT rule
-engine with CP02 disabled.
+Runs sql_formatter_snowflake.py across every model file in a domain and exits
+non-zero if ANY file has a finding. This is the authoritative CAO Snowflake
+lint gate.
+
+There are two things raw sqlfluff can't do, so this wrapper handles them:
+  (a) Snowflake-only syntax — colon field access (Policy.Policy:Field) and
+      multi-field ::OBJECT(Field TYPE, ...) casts. These are protected before
+      sqlfluff parses and restored after, because raw sqlfluff throws PRS on
+      both of them;
+  (b) the CAO identifier doctrine — ID all-caps, raw source columns
+      UPPER_SNAKE, metric aliases PascalCase. This is enforced in Python
+      because sqlfluff's CP02 'consistent' policy can't express it (CP02
+      would force ONE case per file and would semantically rename
+      identifiers — it'd turn ID→Id or TenureDays→TENUREDAYS). So CP02 is
+      disabled and this check replaces it.
+
+After those pass, the sqlfluff engine (CP01/CP03/AL/LT) runs normally.
 
 Usage (from anywhere):
     python3 tools/lint_all.py                          # lints domains/CustomerJourney

@@ -3,71 +3,73 @@
 generate_wide_layer.py — Auto-discovery / auto-assembly for CustomerJourney wide tables
 ==========================================================================================
 Scans models/metric_layer/<Entity>_Metrics/*.sql, discovers every metric file,
-and regenerates the matching models/wide_layer/<Entity>Wide.sql — so adding a
-metric is "drop a file in metric_layer/, run this script" instead of also
-hand-editing the wide model's OBJECT_CONSTRUCT_KEEP_NULL/JOIN lines.
+and regenerates the matching models/wide_layer/<Entity>Wide.sql.
 
-WHY THIS SCRIPT EXISTS (read DEPLOY_HANDOFF.md \u00a74 and \u00a79 first)
--------------------------------------------------------------------------
-Snowflake's server-side dbt runtime (CREATE/EXECUTE DBT PROJECT) cannot see
-the project's file list at compile time — it gets an EMPTY graph, so
-"discover every metric file and regenerate the assembly" is IMPOSSIBLE to
-run *inside* Snowflake today (verified limitation, documented in
-Snow_dbt_writeup_farmers.md \u00a73/Step 3). This script is the fix: it runs
-OUTSIDE Snowflake (locally, or as a GitHub Action — see
-.github/workflows/dbt_ci.yml) where the real file list is visible, and
-writes the wide-layer .sql files that get committed and deployed.
+So adding a metric is "drop a file in metric_layer/, run this script" — you
+never need to hand-edit the wide model's OBJECT_CONSTRUCT_KEEP_NULL/JOIN lines.
 
-This is the same generator pattern already proven in MESAProductDev:
-  - mesa_redshift/generate_calc_views.py       (calc-file -> assembled model)
+WHY THIS EXISTS (read DEPLOY_HANDOFF.md §§4 and 9 first)
+--------------------------------------------------------
+Snowflake's server-side dbt runtime (CREATE/EXECUTE DBT PROJECT) can't see
+the project's file list at compile time — it gets an EMPTY graph. So
+"discover every metric file and regenerate the assembly" is IMPOSSIBLE to run
+inside Snowflake today. This is a verified limitation — documented in
+Snow_dbt_writeup_farmers.md §3/Step 3.
+
+This script is the fix: it runs OUTSIDE Snowflake (locally, or as a GitHub
+Action — see .github/workflows/customer_journey_ci.yml) where the real file
+list is visible, and writes the wide-layer .sql files that get committed and
+deployed.
+
+Same generator pattern already proven in MESAProductDev:
+  - mesa_redshift/generate_calc_views.py       (calc-file → assembled model)
   - model_zoo_bq/tools/mesa_migrate.py          (migration-time stub generator)
 adapted here for CustomerJourney's specific wide-table shape: ONE
 OBJECT_CONSTRUCT_KEEP_NULL(...)::OBJECT(...) column PER metric (not a
-SELECT Base.*, Metrics.* pattern) — this project's doctrine keeps every
-metric's fields isolated in its own named OBJECT column, per
-DEPLOY_HANDOFF.md \u00a710 (OBJECT-only doctrine) and the PolicyWide/
+SELECT Base.*, Metrics.* pattern). This project's doctrine keeps every
+metric's fields isolated in its own named OBJECT column — see
+DEPLOY_HANDOFF.md §10 (OBJECT-only doctrine) and the PolicyWide/
 ChangeEventWide files already in models/wide_layer/.
 
-WHAT COUNTS AS AN "ENTITY" HERE
---------------------------------
+WHAT COUNTS AS AN "ENTITY"
+---------------------------
 Every subfolder of models/metric_layer/ named "<Entity>_Metrics" (e.g.
 "Policy_Metrics", "ChangeEvent_Metrics") is one entity. Its raw model is
-assumed to be "<Entity>Raw" (e.g. "PolicyRaw", "ChangeEventRaw") per this
-project's existing raw_layer/<Entity>/<Entity>Raw.sql convention, and its
-wide model is written to models/wide_layer/<Entity>Wide.sql.
+assumed to be "<Entity>Raw" (e.g. "PolicyRaw", "ChangeEventRaw") — this
+matches the project's existing raw_layer/<Entity>/<Entity>Raw.sql convention.
+Its wide model gets written to models/wide_layer/<Entity>Wide.sql.
 
 HOW EACH METRIC FILE IS READ
-------------------------------
-Every *.sql file directly inside an "<Entity>_Metrics/" folder (skip
-filenames starting with "_", e.g. "_policy_metrics.yml" schema files are
-already skipped by extension) is treated as one metric model. The metric
-name = the filename stem (e.g. "InForce90Flag.sql" -> metric "InForce90Flag"),
-matching this project's 1-metric-per-file convention (see
-DEPLOY_HANDOFF.md \u00a74 "How to add a metric").
+-----------------------------
+Every *.sql file directly inside an "<Entity>_Metrics/" folder is one metric
+model. Filenames starting with "_" are skipped (the _policy_metrics.yml schema
+files are already skipped by extension). The metric name = the filename stem
+(e.g. "InForce90Flag.sql" → metric "InForce90Flag") — matching this project's
+1-metric-per-file convention (see DEPLOY_HANDOFF.md §4).
 
 Each metric's Snowflake column TYPE (needed for the ::OBJECT(<Metric> <TYPE>)
-cast) is determined by, in priority order:
-  1. An explicit annotation comment anywhere in the file:
+cast) is determined in this priority order:
+  1. An explicit annotation comment in the file:
        -- WIDE_TYPE: NUMBER
-     (case-insensitive, any Snowflake scalar type). Metric authors should
-     add this when the heuristic below would guess wrong — it's one comment
-     line, reviewed in the same PR as the metric logic.
-  2. A heuristic based on the metric's final SELECT expression (regexes for
-     common patterns: CASE...THEN 1/0 -> NUMBER, TO_CHAR(...) -> VARCHAR,
-     AVG(...)/RATE/RATIO in the name -> FLOAT, DATEDIFF/COUNT/SUM -> NUMBER).
-  3. Fallback: VARCHAR, with a printed WARNING telling the author to add a
-     WIDE_TYPE annotation — never silently guess wrong without saying so.
+     (case-insensitive, any Snowflake scalar type). If the heuristic below
+     would guess wrong, add this comment — it's one line, reviewed in the
+     same PR as the metric logic.
+  2. A heuristic based on the metric's final SELECT expression. Regexes for
+     common patterns: CASE...THEN 1/0 → NUMBER, TO_CHAR(...) → VARCHAR,
+     AVG(...)/RATE/RATIO in the name → FLOAT, DATEDIFF/COUNT/SUM → NUMBER.
+  3. Fallback: VARCHAR, with a printed WARNING telling you to add a
+     WIDE_TYPE annotation. It NEVER silently guesses wrong without saying so.
 
 JOIN TYPE (INNER vs LEFT)
 --------------------------
-Matches this project's existing convention: PolicyWide INNER JOINs every
-metric (zero-fill contract — every policy has every metric); ChangeEventWide
-LEFT JOINs (not every event has every flag... actually today it does, but
-the doctrine documented in _wide.yml explicitly says ChangeEventWide uses
-LEFT JOIN). Configurable per-entity via --join-type, default is read from
-JOIN_TYPE_BY_ENTITY below (extend this dict for new entities); unset
-entities default to LEFT JOIN (the safer default — never silently drops a
-row that lacks one metric).
+PolicyWide INNER JOINs every metric (zero-fill contract — every policy has
+every metric). ChangeEventWide LEFT JOINs (the doctrine in _wide.yml says
+LEFT JOIN, even though today every event does have every flag).
+
+Configurable per-entity via --join-type. Default reads from
+JOIN_TYPE_BY_ENTITY below — extend that dict for new entities. Unset entities
+default to LEFT JOIN (the safer default — never silently drops a row that
+lacks one metric).
 
 USAGE
 -----

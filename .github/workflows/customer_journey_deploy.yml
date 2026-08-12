@@ -1,19 +1,22 @@
 name: CustomerJourney dbt Deploy
 
 # CAO (Consumer Analytics Orchestration) — Snowflake deploy/build workflow.
-# SEPARATE from the PR-gating workflow (customer_journey_ci.yml) so the PR
-# checks never depend on Snowflake secrets that may not be provisioned yet.
 #
-# This is the ONLY workflow that touches Snowflake. It runs on merge to main.
-# It requires a Snowflake SERVICE ACCOUNT (not a personal account), supplied
-# via GitHub Secrets/Variables — see CAO README / handoff docs for setup.
+# This is the ONLY workflow that touches Snowflake, and it only runs on merge
+# to main. It's separate from the PR-gating workflow (customer_journey_ci.yml)
+# so PR checks never depend on Snowflake secrets that may not be provisioned
+# yet — your PR can pass all the rules without IT having set anything up.
 #
-# ENABLE: this workflow is gated off (`if: false`) until BOTH are true:
+# It needs a Snowflake SERVICE ACCOUNT (not a personal account), supplied
+# via GitHub Secrets/Variables. See the CAO README for setup steps.
+#
+# Currently gated off (`if: false`) until two things are true:
 #   1. The Snowflake service account + least-privilege role exist (IT ticket).
 #   2. GitHub runner IPs can reach Farmers Snowflake (IP allowlist / network
 #      policy — same IT ticket).
-# To enable, flip the job's `if: false` to remove the gate, and set the
-# vars/secrets listed in the env: block below.
+#
+# To enable: remove the `if: false` line below, and set the vars/secrets
+# listed in the env: block.
 
 on:
   push:

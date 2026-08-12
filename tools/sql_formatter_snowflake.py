@@ -1,27 +1,28 @@
 """
-sql_formatter_snowflake.py - specifically created for Farmers Insurance Group by Steven Passanante (contractor 08/07/2026)
-==========================
+sql_formatter_snowflake.py — created for Farmers Insurance Group by Steven Passanante (contractor 08/07/2026)
+==============================
 CAO / Snowflake dialect copy of the MESA SQL Normalizer
 (mesa-governance-api/api/services/sql_formatter.py — ANSI/dbt original).
 
-WHY A SEPARATE FILE
--------------------
-The sqlfluff ANSI/dbt formatter cannot be reused verbatim for Snowflake because of
-dialect-specific syntax the sqlfluff Snowflake grammar handles differently:
+WHY THIS IS A SEPARATE FILE (not just a dialect switch)
+------------------------------------------------------
+The ANSI/dbt formatter can't be reused as-is for Snowflake because of two
+kinds of syntax the Snowflake grammar handles differently:
 
   1. OBJECT-field access via COLON:  `Policy.Policy:PolicyInceptionDate`
      and the wide-table cast `...::OBJECT(Field TYPE, ...)`.
-     sqlfluff's Snowflake dialect cannot parse the multi-field OBJECT cast
-     (PRS "unparsable section") and flags colon field-access oddly. We PROTECT
-     these before linting and restore them after, exactly like _protect_jinja.
+     sqlfluff's Snowflake dialect can't parse the multi-field OBJECT cast
+     (PRS "unparsable section") and flags colon field-access oddly. We
+     PROTECT these before linting and restore them after — same technique
+     as _protect_jinja.
 
-  2. Identifier capitalisation doctrine (CAO-specific, NOT a sqlfluff rule):
+  2. Identifier capitalisation doctrine (CAO-specific, not a sqlfluff rule):
        - The entity primary key column is ALWAYS all-caps:  ID
        - Metric / alias names are ALWAYS PascalCase:  TenureDays, InceptionMonth
      sqlfluff's CP02 ('consistent') would force ONE case per file and rename
-     ID->Id or TenureDays->TENUREDAYS — a SEMANTIC change. So CP02 stays
-     EXCLUDED from the sqlfluff pass (same as MESA) and is enforced by a
-     dedicated Python check below (check_identifier_doctrine) instead.
+     ID→Id or TenureDays→TENUREDAYS — a SEMANTIC change, not cosmetic. So CP02
+     is EXCLUDED from the sqlfluff pass (same as MESA) and enforced by a
+     dedicated Python check (check_identifier_doctrine) instead.
 
 SAME TWO-TIER CONTRACT AS MESA
 -------------------------------
@@ -33,7 +34,7 @@ Public API:
   lint_snowflake_sql(sql)                -> list[lint findings]  (CI gate helper)
   check_identifier_doctrine(sql)         -> list[doctrine violations]
 
-Future dialects (redshift, bigquery, duckdb): copy this file, adjust
+For other dialects (redshift, bigquery, duckdb): copy this file, change
 _DIALECT and the _protect_* helpers for that dialect's unusual syntax.
 """
 
