@@ -12,8 +12,8 @@ SELECT
     Policy.Policy AS Policy
     , OBJECT_CONSTRUCT_KEEP_NULL('AgentChangeCsatScore', AgentChangeCsatScore.AgentChangeCsatScore)::OBJECT(AgentChangeCsatScore FLOAT) AS AgentChangeCsatScore
     , OBJECT_CONSTRUCT_KEEP_NULL('AgentChangeDaysWithoutAgent', AgentChangeDaysWithoutAgent.AgentChangeDaysWithoutAgent)::OBJECT(AgentChangeDaysWithoutAgent FLOAT) AS AgentChangeDaysWithoutAgent
-    , OBJECT_CONSTRUCT_KEEP_NULL('AgentChangeMeetsNeedsFlag', AgentChangeMeetsNeedsFlag.AgentChangeMeetsNeedsFlag)::OBJECT(AgentChangeMeetsNeedsFlag VARCHAR) AS AgentChangeMeetsNeedsFlag
-    , OBJECT_CONSTRUCT_KEEP_NULL('AgentChangeReceivedLetterFlag', AgentChangeReceivedLetterFlag.AgentChangeReceivedLetterFlag)::OBJECT(AgentChangeReceivedLetterFlag VARCHAR) AS AgentChangeReceivedLetterFlag
+    , OBJECT_CONSTRUCT_KEEP_NULL('AgentChangeMeetsNeedsFlag', AgentChangeMeetsNeedsFlag.AgentChangeMeetsNeedsFlag)::OBJECT(AgentChangeMeetsNeedsFlag NUMBER) AS AgentChangeMeetsNeedsFlag
+    , OBJECT_CONSTRUCT_KEEP_NULL('AgentChangeReceivedLetterFlag', AgentChangeReceivedLetterFlag.AgentChangeReceivedLetterFlag)::OBJECT(AgentChangeReceivedLetterFlag NUMBER) AS AgentChangeReceivedLetterFlag
     , OBJECT_CONSTRUCT_KEEP_NULL('AgentChangeRetentionRate90Days', AgentChangeRetentionRate90Days.AgentChangeRetentionRate90Days)::OBJECT(AgentChangeRetentionRate90Days FLOAT) AS AgentChangeRetentionRate90Days
     , OBJECT_CONSTRUCT_KEEP_NULL('CssCesScore', CssCesScore.CssCesScore)::OBJECT(CssCesScore FLOAT) AS CssCesScore
     , OBJECT_CONSTRUCT_KEEP_NULL('InForce90Flag', InForce90Flag.InForce90Flag)::OBJECT(InForce90Flag NUMBER) AS InForce90Flag
