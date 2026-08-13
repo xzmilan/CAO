@@ -114,22 +114,64 @@ jobs:
   # compile time, so it CANNOT discover metric files and regenerate the wide
   # layer — this has to run OUTSIDE Snowflake where the real file list is
   # visible. If you added a metric to models/metric_layer/ but didn't
-  # regenerate the matching wide_layer/*.sql, this gate fails your PR.
+  # regenerate the matching wide_layer/*.sql, this job self-heals it —
+  # same Design A pattern as Job 0 (auto-fix):
   #
-  # Fix locally:
+  #   1. Run generate_wide_layer.py WITHOUT --check — this regenerates
+  #      models/wide_layer/*.sql from whatever metric files exist right now.
+  #   2. If that changed any committed wide_layer file, commit + push it
+  #      straight onto the PR branch, then exit 1 ON PURPOSE — same as Job 0,
+  #      this stops the current (now-stale) run and the push triggers a fresh
+  #      run that evaluates the regenerated, committed wide tables.
+  #   3. If nothing changed, the job just passes, same as before.
+  #
+  # This keeps the "committed wide_layer/*.sql must match git" contract
+  # (deliberate — the deploy workflow regenerates fresh too, but that's
+  # deploy-time truth, not what a PR reviewer sees; this makes both match).
+  #
+  # Manual/local equivalent if you don't want to wait on CI:
   #   cd domains/CustomerJourney && python3 tools/generate_wide_layer.py
-  # then commit the regenerated models/wide_layer/*.sql.
+  # then commit the regenerated models/wide_layer/*.sql yourself.
   auto-assembly-check:
     name: Wide-Layer Auto-Assembly Check
     runs-on: ubuntu-latest
     needs: auto-fix
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Verify wide layer matches metric files
-        run: python3 tools/generate_wide_layer.py --check
+      - name: Regenerate wide layer from current metric files
+        working-directory: domains/CustomerJourney
+        run: python3 tools/generate_wide_layer.py
+      - name: Detect changed wide-layer files
+        id: diff
+        run: |
+          if git diff --quiet -- domains/CustomerJourney/models/wide_layer; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Commit and push regenerated wide layer
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "cao-auto-fix[bot]"
+          git config user.email "cao-auto-fix[bot]@users.noreply.github.com"
+          git add domains/CustomerJourney/models/wide_layer
+          git commit -m "chore: regenerate wide layer (tools/generate_wide_layer.py)"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+      - name: Fail this run (a re-run on the regenerated wide layer will be the real gate)
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          echo "::error::Wide layer was out of sync and has been regenerated + pushed to this branch. A new run is evaluating the fixed code — check that run, not this one."
+          exit 1
 
   # ── Job 2: CAO Lint Gate ───────────────────────────────────────────────
   # Runs lint_all.py, NOT raw `sqlfluff lint`. The Python wrapper does two
