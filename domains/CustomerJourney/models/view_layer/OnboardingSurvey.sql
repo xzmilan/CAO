@@ -1,3 +1,6 @@
+-- CAO Governed Definition (Snowflake)
+-- OnboardingSurvey
+-- Format: keyword/function UPPER | PascalCase aliases | ID all-caps | explicit AS
 -- VIEW: OnboardingSurvey (Onboarding Journeys — Kim Baker, Deanne Martin, Joe Spinelli)
 -- Pure SELECT from SurveyWide — all measures are pre-computed campaign-grain metrics.
 -- No aggregation, no derivation logic in the view layer.

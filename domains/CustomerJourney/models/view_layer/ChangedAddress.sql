@@ -1,3 +1,6 @@
+-- CAO Governed Definition (Snowflake)
+-- ChangedAddress
+-- Format: keyword/function UPPER | PascalCase aliases | ID all-caps | explicit AS
 -- VIEW: ChangedAddress (CONTRACT ITEM 4d / Move Journey — Edgar Lattuada)
 -- Pure SELECT from PolicyWide — all measures are pre-computed policy-grain metrics.
 -- No aggregation, no derivation logic in the view layer.

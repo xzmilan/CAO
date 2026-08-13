@@ -83,6 +83,36 @@ WITH ApexContacts AS (
     FROM PhoneOutcomes
 )
 
+, ContactEventsByContact AS (
+    SELECT
+        ApexContacts.ApexContactId
+        , ARRAY_AGG(
+            OBJECT_CONSTRUCT_KEEP_NULL(
+                'ContactEventId', AllContactEvents.ContactEventId,
+                'ContactChannel', AllContactEvents.ContactChannel,
+                'ContactTimestamp', AllContactEvents.ContactTimestamp,
+                'ContactAttempts', AllContactEvents.ContactAttempts,
+                'TotalCallDurationSeconds', AllContactEvents.TotalCallDurationSeconds,
+                'IsQualifiedContact', AllContactEvents.IsQualifiedContact,
+                'IsQuoteDiscussed', AllContactEvents.IsQuoteDiscussed,
+                'ContactSources', OBJECT_CONSTRUCT_KEEP_NULL(
+                    'ContactSpace', AllContactEvents.SourceContactSpace,
+                    'Livevox', AllContactEvents.SourceLivevox,
+                    'Drips', AllContactEvents.SourceDrips,
+                    'Sfmc', AllContactEvents.SourceSfmc,
+                    'EaJourney', AllContactEvents.SourceEaJourney,
+                    'DbuJourney', AllContactEvents.SourceDbuJourney
+                )
+            )
+        ) WITHIN GROUP (ORDER BY AllContactEvents.ContactTimestamp) AS ContactEvents
+    FROM ApexContacts
+    LEFT JOIN AllContactEvents
+    -- TODO: join key TBD — need to map FFQ_QUOTE_ID or phone/email
+        -- to APEX contact. This is the diagnosis target.
+        ON FALSE
+    GROUP BY ApexContacts.ApexContactId
+)
+
 SELECT
     BASE64_ENCODE(SHA2(ApexContacts.ApexContactId, 256)) AS ID
 
@@ -101,37 +131,12 @@ SELECT
             'State', ApexContacts.MailingState,
             'Zip', ApexContacts.MailingZip
         ),
-        'ContactEvents', COALESCE(
-            (
-                SELECT ARRAY_AGG(
-                    OBJECT_CONSTRUCT_KEEP_NULL(
-                        'ContactEventId', AllContactEvents.ContactEventId,
-                        'ContactChannel', AllContactEvents.ContactChannel,
-                        'ContactTimestamp', AllContactEvents.ContactTimestamp,
-                        'ContactAttempts', AllContactEvents.ContactAttempts,
-                        'TotalCallDurationSeconds', AllContactEvents.TotalCallDurationSeconds,
-                        'IsQualifiedContact', AllContactEvents.IsQualifiedContact,
-                        'IsQuoteDiscussed', AllContactEvents.IsQuoteDiscussed,
-                        'ContactSources', OBJECT_CONSTRUCT_KEEP_NULL(
-                            'ContactSpace', AllContactEvents.SourceContactSpace,
-                            'Livevox', AllContactEvents.SourceLivevox,
-                            'Drips', AllContactEvents.SourceDrips,
-                            'Sfmc', AllContactEvents.SourceSfmc,
-                            'EaJourney', AllContactEvents.SourceEaJourney,
-                            'DbuJourney', AllContactEvents.SourceDbuJourney
-                        )
-                    )
-                ) WITHIN GROUP (ORDER BY AllContactEvents.ContactTimestamp)
-                FROM AllContactEvents
-                -- TODO: join key TBD — need to map FFQ_QUOTE_ID or phone/email
-                -- to APEX contact. This is the diagnosis target.
-                WHERE FALSE
-            ),
-            ARRAY_CONSTRUCT()
-        ),
+        'ContactEvents', COALESCE(ContactEventsByContact.ContactEvents, ARRAY_CONSTRUCT()),
         'SystemIds', OBJECT_CONSTRUCT_KEEP_NULL(
             'ApexContactId', ApexContacts.ApexContactId,
             'ApexAccountId', ApexContacts.ApexAccountId
         )
     ) AS Contact
 FROM ApexContacts
+LEFT JOIN ContactEventsByContact
+    ON ApexContacts.ApexContactId = ContactEventsByContact.ApexContactId

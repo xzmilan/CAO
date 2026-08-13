@@ -8,18 +8,19 @@
 
 WITH AgentChangeSurveys AS (
     SELECT
-        SurveyResponse.value:SystemIds.PolicyNumber::VARCHAR AS PolicyNumber
+        value:SystemIds.PolicyNumber::VARCHAR AS PolicyNumber
         , MAX(
             CASE
-                WHEN UPPER(SurveyResponse.value:AgentChangeDetails.MeetsNeedsFlag::VARCHAR) = 'Y' THEN 1
-                WHEN UPPER(SurveyResponse.value:AgentChangeDetails.MeetsNeedsFlag::VARCHAR) = 'N' THEN 0
+                WHEN UPPER(value:AgentChangeDetails.MeetsNeedsFlag::VARCHAR) = 'Y' THEN 1
+                WHEN UPPER(value:AgentChangeDetails.MeetsNeedsFlag::VARCHAR) = 'N' THEN 0
                 ELSE NULL
             END
         ) AS MeetsNeedsFlag
+        , COUNT(value) AS SurveyResponseCount
     FROM {{ ref('SurveyRaw') }} AS Survey
-    CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Survey:Responses) AS SurveyResponse
+    CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Survey:Responses)
     WHERE Survey.Survey:SurveyType = 'AGENT_CHANGE'
-    GROUP BY SurveyResponse.value:SystemIds.PolicyNumber::VARCHAR
+    GROUP BY value:SystemIds.PolicyNumber::VARCHAR
 )
 
 SELECT

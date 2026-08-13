@@ -1,3 +1,6 @@
+-- CAO Governed Definition (Snowflake)
+-- ChangedProducer
+-- Format: keyword/function UPPER | PascalCase aliases | ID all-caps | explicit AS
 -- VIEW: ChangedProducer (CONTRACT ITEM 4e / Agency Change Journey — Jessica Campbell)
 -- Pure SELECT from PolicyWide — all measures are pre-computed policy-grain metrics.
 -- No aggregation, no derivation logic in the view layer.

@@ -1,3 +1,6 @@
+-- CAO Governed Definition (Snowflake)
+-- AgencyChangeSurvey
+-- Format: keyword/function UPPER | PascalCase aliases | ID all-caps | explicit AS
 -- VIEW: AgencyChangeSurvey (Agency Change Journey — Jessica Campbell)
 -- Pure SELECT from SurveyWide — all measures are pre-computed campaign-grain metrics.
 -- No aggregation, no derivation logic in the view layer.

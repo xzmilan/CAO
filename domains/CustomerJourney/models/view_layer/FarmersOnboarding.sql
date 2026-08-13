@@ -1,3 +1,6 @@
+-- CAO Governed Definition (Snowflake)
+-- FarmersOnboarding
+-- Format: keyword/function UPPER | PascalCase aliases | ID all-caps | explicit AS
 -- VIEW: FarmersOnboarding
 -- NB cohort, Farmers business entity, by inception month
 
