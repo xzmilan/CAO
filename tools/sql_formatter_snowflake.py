@@ -1,5 +1,5 @@
 """
-sql_formatter_snowflake.py — created for Farmers Insurance Group by Steven Passanante (contractor 08/07/2026)
+sql_formatter_snowflake.py — Originally created by Steven Passanante (contractor 08/07/2026) modified for free use for Farmers Insurance Group
 ==============================
 CAO / Snowflake dialect copy of the MESA SQL Normalizer
 (mesa-governance-api/api/services/sql_formatter.py — ANSI/dbt original).
@@ -617,6 +617,25 @@ def lint_snowflake_sql(
             # Skip LT05 (line length) for auto-generated wide_layer files.
             if is_generated_wide and code == "LT05":
                 continue
+            # AL05 false-positive: sqlfluff's Snowflake dialect does not
+            # recognize a LATERAL FLATTEN alias as "used" when its fields
+            # are accessed via colon notation (alias.value:Field). The
+            # alias is genuinely referenced, but sqlfluff still flags it
+            # unused, and its only available autofix is to DELETE the alias
+            # — which would break every downstream reference to it. This is
+            # a dialect gap, not dead code. Only skip AL05 when the flagged
+            # alias is declared immediately after a LATERAL FLATTEN(...) in
+            # this same statement; a genuinely unused, non-FLATTEN alias
+            # must still fail the gate.
+            if code == "AL05":
+                alias_match = re.search(r"Alias '(\w+)' is never used", str(v))
+                if alias_match:
+                    flatten_alias_re = re.compile(
+                        rf"LATERAL\s+FLATTEN\([^)]*\)\s+AS\s+{re.escape(alias_match.group(1))}\b",
+                        re.IGNORECASE,
+                    )
+                    if flatten_alias_re.search(sql):
+                        continue
             findings.append({
                 "rule": code,
                 "message": str(v),

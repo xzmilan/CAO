@@ -1,0 +1,52 @@
+# =============================================================================
+# ssrocha.yml — SSROCHA contact data source declaration
+# See fdr.yml's header for how these files work. The FFQ_QUOTE_ID caveat
+# lives in the source description below.
+# =============================================================================
+version: 2
+
+sources:
+  - name: ssrocha
+    database: PRD_BIZDB_PL_MARKETING
+    schema: SSROCHA
+    description: |
+      Sales & Service Reporting contact data — outbound contact attempts
+      and their outcomes.
+
+      THE BIG PICTURE:
+      Every JO journey asks for "Customer Contacts per 100 PIF." This schema
+      holds the outbound contact data (calls, emails, journeys) that feeds
+      the numerator of that metric.
+
+      THE OPEN QUESTION:
+      The contact data is keyed by FFQ_QUOTE_ID (a quote identifier), not a
+      policy number. How FFQ_QUOTE_ID maps to policies is under diagnosis —
+      see docs/JODataNeeds/DiagnosisFiles/DIAGNOSE_agent_contacts_join.sql.
+      Until that's resolved, contact metrics can't be rolled to policy grain.
+    meta:
+      owner: "Sales & service reporting team"
+    tables:
+      - name: contact_space_performance
+        description: |
+          ContactSpace outbound contact performance — one row per contact
+          event per quote. 160K rows. Tracks which channels touched the
+          customer (ContactSpace, Livevox, Drips, SFMC, EA/DBU journeys).
+        columns:
+          - name: FFQ_QUOTE_ID
+            description: |
+              FFQ quote identifier — the key this table is built on.
+              ⚠ This is NOT a policy number. The quote→policy mapping is
+              under diagnosis; don't assume a direct join to PolicyRaw.
+            meta:
+              declared_because: "usage_rule"
+          - name: CONTACTSPACE_CONTACT_ATTEMPTS
+            description: |
+              Number of contact attempts made for this quote.
+            meta:
+              declared_because: "usage_rule"
+          - name: CONTACTSPACE_IS_QUALIFIED_CONTACT
+            description: |
+              Whether the contact was "qualified" (reached the right person
+              and had a real conversation). TRUE/FALSE.
+            meta:
+              declared_because: "usage_rule"

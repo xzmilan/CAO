@@ -1,0 +1,35 @@
+# =============================================================================
+# contactspace_prod.yml — ContactSpace production source declaration
+# See fdr.yml's header for how these files work. The SSROCHA-vs-prod
+# distinction lives in the source description below.
+# =============================================================================
+version: 2
+
+sources:
+  - name: contactspace_prod
+    database: PRD_BIZPROD_DIRECT_BU
+    schema: CONTACTSPACE_PROD
+    description: |
+      ContactSpace production contact data — the raw event feed from the
+      outbound contact platform.
+
+      SSROCHA vs CONTACTSPACE_PROD:
+      SSROCHA.CONTACT_SPACE_PERFORMANCE is the curated/analysis version.
+      This schema (CONTACTSPACE_PROD) is the raw production feed — more rows,
+      more granular, less processed. ContactRaw reads from both.
+    meta:
+      owner: "Direct BU segment team"
+    tables:
+      - name: phone_outcome_recorded
+        description: |
+          Phone call outcomes — one row per recorded phone outcome.
+          1.08M rows.
+        columns:
+          - name: ID
+            description: |
+              Unique identifier for the phone outcome event.
+            meta:
+              declared_because: "tested"
+            tests:
+              - not_null
+              - unique

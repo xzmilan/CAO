@@ -10,7 +10,12 @@
 
 SELECT
     Policy.Policy AS Policy
+    , OBJECT_CONSTRUCT_KEEP_NULL('AgentChangeCsatScore', AgentChangeCsatScore.AgentChangeCsatScore)::OBJECT(AgentChangeCsatScore FLOAT) AS AgentChangeCsatScore
+    , OBJECT_CONSTRUCT_KEEP_NULL('AgentChangeDaysWithoutAgent', AgentChangeDaysWithoutAgent.AgentChangeDaysWithoutAgent)::OBJECT(AgentChangeDaysWithoutAgent FLOAT) AS AgentChangeDaysWithoutAgent
+    , OBJECT_CONSTRUCT_KEEP_NULL('AgentChangeMeetsNeedsFlag', AgentChangeMeetsNeedsFlag.AgentChangeMeetsNeedsFlag)::OBJECT(AgentChangeMeetsNeedsFlag NUMBER) AS AgentChangeMeetsNeedsFlag
+    , OBJECT_CONSTRUCT_KEEP_NULL('AgentChangeReceivedLetterFlag', AgentChangeReceivedLetterFlag.AgentChangeReceivedLetterFlag)::OBJECT(AgentChangeReceivedLetterFlag NUMBER) AS AgentChangeReceivedLetterFlag
     , OBJECT_CONSTRUCT_KEEP_NULL('AgentChangeRetentionRate90Days', AgentChangeRetentionRate90Days.AgentChangeRetentionRate90Days)::OBJECT(AgentChangeRetentionRate90Days FLOAT) AS AgentChangeRetentionRate90Days
+    , OBJECT_CONSTRUCT_KEEP_NULL('CssCesScore', CssCesScore.CssCesScore)::OBJECT(CssCesScore FLOAT) AS CssCesScore
     , OBJECT_CONSTRUCT_KEEP_NULL('InForce90Flag', InForce90Flag.InForce90Flag)::OBJECT(InForce90Flag NUMBER) AS InForce90Flag
     , OBJECT_CONSTRUCT_KEEP_NULL('InceptionMonth', InceptionMonth.InceptionMonth)::OBJECT(InceptionMonth VARCHAR) AS InceptionMonth
     , OBJECT_CONSTRUCT_KEEP_NULL('MovedPolicyRetentionRate90Days', MovedPolicyRetentionRate90Days.MovedPolicyRetentionRate90Days)::OBJECT(MovedPolicyRetentionRate90Days FLOAT) AS MovedPolicyRetentionRate90Days
@@ -19,11 +24,24 @@ SELECT
     , OBJECT_CONSTRUCT_KEEP_NULL('NumberOfMovedPoliciesInForce90Days', NumberOfMovedPoliciesInForce90Days.NumberOfMovedPoliciesInForce90Days)::OBJECT(NumberOfMovedPoliciesInForce90Days NUMBER) AS NumberOfMovedPoliciesInForce90Days
     , OBJECT_CONSTRUCT_KEEP_NULL('NumberOfPoliciesInForce', NumberOfPoliciesInForce.NumberOfPoliciesInForce)::OBJECT(NumberOfPoliciesInForce NUMBER) AS NumberOfPoliciesInForce
     , OBJECT_CONSTRUCT_KEEP_NULL('NumberOfZipChangeEvents', NumberOfZipChangeEvents.NumberOfZipChangeEvents)::OBJECT(NumberOfZipChangeEvents NUMBER) AS NumberOfZipChangeEvents
+    , OBJECT_CONSTRUCT_KEEP_NULL('OnboardingNpsScore', OnboardingNpsScore.OnboardingNpsScore)::OBJECT(OnboardingNpsScore FLOAT) AS OnboardingNpsScore
+    , OBJECT_CONSTRUCT_KEEP_NULL('RenewalNpsScore', RenewalNpsScore.RenewalNpsScore)::OBJECT(RenewalNpsScore FLOAT) AS RenewalNpsScore
+    , OBJECT_CONSTRUCT_KEEP_NULL('RnpsScore', RnpsScore.RnpsScore)::OBJECT(RnpsScore FLOAT) AS RnpsScore
     , OBJECT_CONSTRUCT_KEEP_NULL('TenureDays', TenureDays.TenureDays)::OBJECT(TenureDays NUMBER) AS TenureDays
     , OBJECT_CONSTRUCT_KEEP_NULL('TermType', TermType.TermType)::OBJECT(TermType VARCHAR) AS TermType
 FROM {{ ref('PolicyRaw') }} AS Policy
+INNER JOIN {{ ref('AgentChangeCsatScore') }} AS AgentChangeCsatScore
+    ON Policy.ID = AgentChangeCsatScore.ID
+INNER JOIN {{ ref('AgentChangeDaysWithoutAgent') }} AS AgentChangeDaysWithoutAgent
+    ON Policy.ID = AgentChangeDaysWithoutAgent.ID
+INNER JOIN {{ ref('AgentChangeMeetsNeedsFlag') }} AS AgentChangeMeetsNeedsFlag
+    ON Policy.ID = AgentChangeMeetsNeedsFlag.ID
+INNER JOIN {{ ref('AgentChangeReceivedLetterFlag') }} AS AgentChangeReceivedLetterFlag
+    ON Policy.ID = AgentChangeReceivedLetterFlag.ID
 INNER JOIN {{ ref('AgentChangeRetentionRate90Days') }} AS AgentChangeRetentionRate90Days
     ON Policy.ID = AgentChangeRetentionRate90Days.ID
+INNER JOIN {{ ref('CssCesScore') }} AS CssCesScore
+    ON Policy.ID = CssCesScore.ID
 INNER JOIN {{ ref('InForce90Flag') }} AS InForce90Flag
     ON Policy.ID = InForce90Flag.ID
 INNER JOIN {{ ref('InceptionMonth') }} AS InceptionMonth
@@ -40,6 +58,12 @@ INNER JOIN {{ ref('NumberOfPoliciesInForce') }} AS NumberOfPoliciesInForce
     ON Policy.ID = NumberOfPoliciesInForce.ID
 INNER JOIN {{ ref('NumberOfZipChangeEvents') }} AS NumberOfZipChangeEvents
     ON Policy.ID = NumberOfZipChangeEvents.ID
+INNER JOIN {{ ref('OnboardingNpsScore') }} AS OnboardingNpsScore
+    ON Policy.ID = OnboardingNpsScore.ID
+INNER JOIN {{ ref('RenewalNpsScore') }} AS RenewalNpsScore
+    ON Policy.ID = RenewalNpsScore.ID
+INNER JOIN {{ ref('RnpsScore') }} AS RnpsScore
+    ON Policy.ID = RnpsScore.ID
 INNER JOIN {{ ref('TenureDays') }} AS TenureDays
     ON Policy.ID = TenureDays.ID
 INNER JOIN {{ ref('TermType') }} AS TermType

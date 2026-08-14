@@ -1,0 +1,131 @@
+# =============================================================================
+# rten.yml — RTEN source declaration
+# See fdr.yml's header for how these files work. The 421M-row transaction
+# table warning lives in the source description below so it renders in dbt docs.
+# =============================================================================
+version: 2
+
+sources:
+  - name: rten
+    database: PRD_EDBIDB
+    schema: RTEN
+    description: |
+      RTEN retention source tables. These are trial-account mirrors of the
+      production tables — same shape, subset of data.
+
+      ⚠ READ THIS BEFORE TOUCHING rten_dim_pl_trn_xlob:
+      That table is 421M rows / 172 GB — the policy TRANSACTION dimension,
+      every policy change event ever. Models must NEVER join to it directly.
+      All access goes through PolicyRaw / ChangeEventRaw, which dedupe and
+      quarantine it. The column notes below exist so you understand what the
+      raw entities are built from — not so you can build on it yourself.
+    meta:
+      owner: "EDBI platform team"
+      environment_note: "Trial mirrors — validate against prod before Farmers deploy"
+    tables:
+      - name: rten_xcmpy_pif_tbl
+        description: |
+          Current-state policy snapshot. One row per policy — this is the
+          spine of the Policy entity. Prod: 42M rows / 5 GB.
+          Single-state (no history) — 1.02 rows per policy on average.
+        columns:
+          - name: PLCY_CNTRCT_NUM
+            description: |
+              Policy contract number — the natural key for a policy. Both
+              tests exist because this is THE policy identifier: if it's
+              NULL or duplicated, the entire Policy entity grain breaks.
+            meta:
+              declared_because: "join_key + tested"
+            tests:
+              - not_null
+              - unique
+          - name: PLCY_INCEPT_DT
+            description: |
+              ORIGINAL policy inception date — the very first inception ever,
+              NOT the current term start. This is the tenure anchor. If you
+              want "how long has this customer been with us," start here.
+            meta:
+              declared_because: "usage_rule + tested"
+            tests:
+              - not_null
+          - name: CNCL_DT
+            description: |
+              Cancellation date. NULL means the policy is still in force.
+              Retention metrics key off this.
+            meta:
+              declared_because: "usage_rule"
+
+      - name: rten_dim_pl_trn_xlob
+        description: |
+          Policy transaction dimension — every policy change event ever.
+          Prod: 421M rows / 172 GB.
+          ⚠ NEVER join to this table directly from a model. All access goes
+          through PolicyRaw / ChangeEventRaw (deduped + quarantined).
+        columns:
+          - name: PLCY_CNTRCT_NUM
+            description: |
+              Policy contract number — links each transaction back to its policy.
+            meta:
+              declared_because: "join_key + tested"
+            tests:
+              - not_null
+          - name: RESDC_ZIP_5_CD
+            description: |
+              5-digit residential ZIP. THIS is the column to use for move
+              detection (ZIP_CHANGE events).
+            meta:
+              declared_because: "usage_rule"
+          - name: RESDC_FULL_ZIP_CD
+            description: |
+              ZIP+4 (full 9-digit ZIP). Do NOT use this for move detection —
+              ZIP+4 changes for mail-routing reasons that have nothing to do
+              with a customer moving. You'll get false-positive "moves."
+            meta:
+              declared_because: "usage_rule"
+          - name: SRC_SYS_CD
+            description: |
+              Source system code at transaction time (EA, GWPC, AFL, AFO).
+              Note: Bristol West and Specialty rows have this BLANK — they
+              can't be enriched from this table.
+            meta:
+              declared_because: "usage_rule"
+          - name: EFF_DT
+            description: |
+              Transaction effective date. This is the event-ordering anchor —
+              when the change actually took effect. Used with SRC_TRANS_TMSP
+              as the tiebreak when a policy has multiple transactions on the
+              same effective date.
+            meta:
+              declared_because: "usage_rule"
+          - name: SRC_TRANS_TMSP
+            description: |
+              Source transaction timestamp — when the source system recorded
+              the transaction. Tiebreak within the same EFF_DT, and the audit
+              lineage pointer back to the source system.
+            meta:
+              declared_because: "usage_rule"
+          - name: AGT_OF_RECRD_NUM
+            description: |
+              Agent of record at transaction time. Comparing this value to the
+              previous transaction's value (LAG) is how AGENT_CHANGE events
+              are detected.
+            meta:
+              declared_because: "usage_rule"
+
+      - name: tfrdb_fws_pol_snap_mthly_rpt
+        description: |
+          FWS monthly policy snapshot — one row per policy per month. This is
+          the existing pattern the Farmers archive replicates. Prod: 5.4M rows.
+          PolicyRaw nests these as the MonthlySnapshots array.
+        columns:
+          - name: SNAP_YR_MO_CD
+            description: |
+              Snapshot month in YYYY-MM format — the archive stamp telling you
+              which month this row's values describe.
+            meta:
+              declared_because: "usage_rule"
+          - name: EXT_POL_SFX_CONCAT_CD
+            description: |
+              Policy number — join key back to the policy spine.
+            meta:
+              declared_because: "join_key"

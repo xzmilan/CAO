@@ -1,3 +1,6 @@
+-- CAO Governed Definition (Snowflake)
+-- FwsOnboarding
+-- Format: keyword/function UPPER | PascalCase aliases | ID all-caps | explicit AS
 -- VIEW: FwsOnboarding
 -- NB cohort, FWS business entity, by inception month
 

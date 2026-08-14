@@ -65,6 +65,24 @@ ignore_comment_clauses = true
 [sqlfluff:path:models/wide_layer]
 exclude_rules = LT05
 
+# AL05 (aliasing.unused) has a known false-positive on Snowflake
+# LATERAL FLATTEN output aliases. sqlfluff's Snowflake dialect does not
+# recognize a FLATTEN alias as "used" when its fields are accessed via
+# colon notation (alias.value:Field) inside a SELECT/GROUP BY. Verified
+# 2026-08-12 on models/metric_layer/Policy_Metrics/AgentChange*.sql and
+# related survey metrics — the alias IS referenced, but sqlfluff flags it
+# unused, and its only autofix deletes the alias and then breaks every
+# downstream reference to it. This is a dialect gap, not a code issue.
+#
+# AL05 cannot be cleanly path-scoped the way LT05 is, because LATERAL
+# FLATTEN appears across raw_layer AND metric_layer (not one folder), so
+# the exemption is implemented as a scoped check in the Python gate —
+# tools/sql_formatter_snowflake.py::lint_snowflake_sql — which only skips
+# AL05 when the flagged alias is declared immediately after a
+# LATERAL FLATTEN(...). A genuinely unused, non-FLATTEN alias still fails.
+# Do NOT add AL05 to a [sqlfluff:path:...] exclude_rules block to work
+# around this — that would also silence real unused-alias findings.
+
 # SNOWFLAKE-SYNTAX HANDLING (colons + OBJECT casts):
 # sqlfluff's Snowflake grammar cannot parse two constructs this project uses
 # heavily:  (a) OBJECT field access via colon  Policy.Policy:InceptionDate, and

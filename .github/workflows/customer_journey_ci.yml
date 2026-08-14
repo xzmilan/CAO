@@ -30,6 +30,13 @@ on:
       - "tools/**"
       - ".github/workflows/customer_journey_ci.yml"
 
+# The auto-fix job (Job 0) pushes a commit back onto the PR branch. The
+# default GITHUB_TOKEN on a pull_request event is read-only unless the
+# workflow explicitly asks for write access, so this must be declared here.
+# Scoped to THIS workflow file only — no repo-level permission change.
+permissions:
+  contents: write
+
 # All jobs run inside the domain folder — the domain is a self-contained dbt
 # project (its own dbt_project.yml, profiles.yml, tools/).
 defaults:
@@ -37,26 +44,134 @@ defaults:
     working-directory: domains/CustomerJourney
 
 jobs:
+  # ── Job 0: Auto-Fix ─────────────────────────────────────────────────────
+  # Runs tools/fix_all.py — sqlfluff fix mode (CP01/CP03/AL01/02/04/05,
+  # LT01/02/05/06; CP02 excluded by design, see .sqlfluff) — across every
+  # model file in the domain BEFORE lint ever runs. It only applies the safe
+  # cosmetic fixes; it never rewrites identifier case (that is enforced
+  # lint-only by check_identifier_doctrine, never auto-changed).
+  #
+  # If fix_all.py changes anything, this job commits + pushes the fix straight
+  # onto the PR branch, then exits 1 ON PURPOSE. That push starts a fresh
+  # workflow run against the now-clean code, and THAT run is the one whose
+  # gates (auto-assembly → lint → compile) have to go green. The exit-1 here
+  # is expected, not a failure — the check goes green on the auto-triggered
+  # re-run a few seconds later.
+  #
+  # If fix_all.py makes no changes, this job just passes and the rest of the
+  # gates run in this same run, exactly like before this job existed.
+  #
+  # Guarded to same-repo PRs only: a fork PR's GITHUB_TOKEN cannot push to
+  # the fork, so the job would always fail. xzmilan/CAO has no external
+  # contributors today, but the guard keeps it correct if that changes.
+  auto-fix:
+    name: Auto-Fix (sqlfluff fix)
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    # git + fix_all.py run from the repo root, not the domain folder — this
+    # overrides the workflow-level `defaults` working-directory.
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Check out the PR head branch by name (not the detached merge ref)
+          # and fetch full history, so the push below is a clean fast-forward.
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install linting dependencies
+        run: pip install "sqlfluff>=2.0.0,<4.0.0"
+      - name: Run auto-fix across CustomerJourney models
+        run: python3 tools/fix_all.py --domain CustomerJourney
+      - name: Detect changed files
+        id: diff
+        run: |
+          if git diff --quiet -- domains/CustomerJourney/models; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Commit and push auto-fixed files
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "cao-auto-fix[bot]"
+          git config user.email "cao-auto-fix[bot]@users.noreply.github.com"
+          git add domains/CustomerJourney/models
+          git commit -m "style: auto-fix SQL formatting (tools/fix_all.py)"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+      - name: Fail this run (a re-run on fixed code will be the real gate)
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          echo "::error::Auto-fix pushed a formatting commit to this branch. A new run is evaluating the fixed code — check that run, not this one."
+          exit 1
+
   # ── Job 1: Auto-assembly check ─────────────────────────────────────────
   # Snowflake's server-side dbt runtime gets an EMPTY file-list graph at
   # compile time, so it CANNOT discover metric files and regenerate the wide
   # layer — this has to run OUTSIDE Snowflake where the real file list is
   # visible. If you added a metric to models/metric_layer/ but didn't
-  # regenerate the matching wide_layer/*.sql, this gate fails your PR.
+  # regenerate the matching wide_layer/*.sql, this job self-heals it —
+  # same Design A pattern as Job 0 (auto-fix):
   #
-  # Fix locally:
+  #   1. Run generate_wide_layer.py WITHOUT --check — this regenerates
+  #      models/wide_layer/*.sql from whatever metric files exist right now.
+  #   2. If that changed any committed wide_layer file, commit + push it
+  #      straight onto the PR branch, then exit 1 ON PURPOSE — same as Job 0,
+  #      this stops the current (now-stale) run and the push triggers a fresh
+  #      run that evaluates the regenerated, committed wide tables.
+  #   3. If nothing changed, the job just passes, same as before.
+  #
+  # This keeps the "committed wide_layer/*.sql must match git" contract
+  # (deliberate — the deploy workflow regenerates fresh too, but that's
+  # deploy-time truth, not what a PR reviewer sees; this makes both match).
+  #
+  # Manual/local equivalent if you don't want to wait on CI:
   #   cd domains/CustomerJourney && python3 tools/generate_wide_layer.py
-  # then commit the regenerated models/wide_layer/*.sql.
+  # then commit the regenerated models/wide_layer/*.sql yourself.
   auto-assembly-check:
     name: Wide-Layer Auto-Assembly Check
     runs-on: ubuntu-latest
+    needs: auto-fix
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Verify wide layer matches metric files
-        run: python3 tools/generate_wide_layer.py --check
+      - name: Regenerate wide layer from current metric files
+        working-directory: domains/CustomerJourney
+        run: python3 tools/generate_wide_layer.py
+      - name: Detect changed wide-layer files
+        id: diff
+        run: |
+          if git diff --quiet -- domains/CustomerJourney/models/wide_layer; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Commit and push regenerated wide layer
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "cao-auto-fix[bot]"
+          git config user.email "cao-auto-fix[bot]@users.noreply.github.com"
+          git add domains/CustomerJourney/models/wide_layer
+          git commit -m "chore: regenerate wide layer (tools/generate_wide_layer.py)"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+      - name: Fail this run (a re-run on the regenerated wide layer will be the real gate)
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          echo "::error::Wide layer was out of sync and has been regenerated + pushed to this branch. A new run is evaluating the fixed code — check that run, not this one."
+          exit 1
 
   # ── Job 2: CAO Lint Gate ───────────────────────────────────────────────
   # Runs lint_all.py, NOT raw `sqlfluff lint`. The Python wrapper does two

@@ -1,0 +1,79 @@
+# =============================================================================
+# fdr.yml — FDR source declaration
+# =============================================================================
+# WHAT THIS FILE IS:
+#   This file tells dbt "these warehouse tables exist, and here's what matters
+#   about them." It does NOT create tables or move data — it's a declaration
+#   that lets models reference these tables via {{ source('fdr', 'table') }}
+#   instead of hardcoding PRD_EDBIDB.FDR.TABLE_NAME everywhere.
+#
+# WHY COLUMNS ARE LISTED (and why only some):
+#   dbt reads the warehouse directly when compiling SQL — undeclared columns
+#   still work fine in models. A column is declared here ONLY when it carries
+#   one of two things:
+#     1. A TEST (like not_null) — dbt turns these into real audit queries
+#        that run during `dbt test` / `dbt build` and fail the build if the
+#        source data violates the contract.
+#     2. A RULE YOU NEED TO KNOW BEFORE USING IT — a gotcha that will bite
+#        you if you don't read it first (e.g., "this column is the ONLY
+#        trustworthy NB/RB signal — the other way of calculating it is broken").
+#   If a column has neither, it's left out on purpose — listing all 60 columns
+#   of a table adds maintenance burden with zero payoff.
+#
+# THE meta: declared_because FIELD:
+#   Machine-readable note saying WHY each column earned its place here.
+#   Allowed values:
+#     join_key        — used to join this table to others; losing it breaks joins
+#     tested          — has a dbt test attached; the test is the reason it's here
+#     usage_rule      — carries a "read this before using" warning
+#     forward_doc     — not used by any model yet; documented for planned work
+# =============================================================================
+version: 2
+
+sources:
+  - name: fdr
+    database: PRD_EDBIDB
+    schema: FDR
+    description: |
+      FDR (Farmers Data Repository) master data.
+      Covers ~100% of FARMERS + FWS policies. Contains ZERO Bristol West
+      or Specialty data — do not build those journeys on this source.
+    meta:
+      owner: "EDBI platform team"
+      coverage: "FARMERS + FWS only"
+    tables:
+      - name: fdr_mdm_plcy_stats
+        description: |
+          MDM policy master table (slowly-changing dimension, type 2).
+          This is where the authoritative New Business vs Renewal Business
+          flag lives (PRIOR_PLCY), plus the affiliation type used to identify
+          the FWS onboarding cohort.
+        columns:
+          - name: PLCY_NUM
+            description: |
+              Policy number. This is the join key to the RTEN policy table
+              (RTEN_XCMPY_PIF_TBL.PLCY_CNTRCT_NUM). The not_null test exists
+              because a NULL here means the policy can't join to anything —
+              that's a source-data problem worth failing the build over.
+            meta:
+              declared_because: "join_key + tested"
+            tests:
+              - not_null
+          - name: PRIOR_PLCY
+            description: |
+              Prior policy number. NULL means this is New Business (the
+              customer has no prior policy). This is THE authoritative
+              NB/RB signal. Do NOT try to derive NB/RB from date math
+              (DATEDIFF between inception and term start) — that rule was
+              validated against this column and disagrees on ~9M policies,
+              mostly long-gap rewrites. Use this column, always.
+            meta:
+              declared_because: "usage_rule"
+          - name: AFFILIATION_TYP
+            description: |
+              Affiliation type. 'EM' = Employee/Member, which identifies the
+              FWS (Farmers Workplace Solutions) onboarding cohort. Not used
+              by any model yet — declared now because the FWS onboarding
+              journey work will need it.
+            meta:
+              declared_because: "forward_doc"

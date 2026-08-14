@@ -21,12 +21,20 @@ models:
         +schema: RAW_POLICY
       ChangeEvent:
         +schema: RAW_CHANGE_EVENT
+      Survey:
+        +schema: RAW_SURVEY
+      Contact:
+        +schema: RAW_CONTACT
     metric_layer:
       +materialized: table
       Policy_Metrics:
         +schema: METRICS_POLICY
       ChangeEvent_Metrics:
         +schema: METRICS_CHANGE_EVENT
+      Survey_Metrics:
+        +schema: METRICS_SURVEY
+      Contact_Metrics:
+        +schema: METRICS_CONTACT
     wide_layer:
       +materialized: table
       +schema: WIDE
