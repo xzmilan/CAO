@@ -6,9 +6,9 @@
 -- Contract: 1 row per policy ID = 1:1
 
 SELECT
-    policy.*
+    Policy.*
     , CASE
-        WHEN policy.Policy:cancellationdate IS null THEN 1
+        WHEN Policy.Policy:cancellationdate IS null THEN 1
         ELSE 0
-    END AS teststresscheckflag
-FROM {{ ref('PolicyRaw') }} AS policy
+    END AS TestStressCheckFlag
+FROM {{ ref('PolicyRaw') }} AS Policy

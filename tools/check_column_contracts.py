@@ -47,6 +47,7 @@ CAO_ROOT = TOOLS_DIR.parent
 sys.path.insert(0, str(TOOLS_DIR))
 
 from sql_formatter_snowflake import _extract_object_casts, _protect_jinja  # noqa: E402
+from rule_help import print_help_for_rules  # noqa: E402
 
 # ── Regexes ──────────────────────────────────────────────────────────────────
 # ref('Name') or ref("Name") — capture the model name
@@ -791,6 +792,7 @@ def main() -> int:
             print()
 
         print(f"SUMMARY: {len(violations)} violations, {len(warnings)} warnings")
+        print_help_for_rules({v.rule for v in violations})
         return 1
 
     print(f"\nAll column contracts valid. ({len(warnings)} warnings)")
