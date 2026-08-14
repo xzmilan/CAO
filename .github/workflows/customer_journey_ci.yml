@@ -5,12 +5,18 @@ name: CustomerJourney dbt CI
 # to test, format, etc can be applied to all domains. We can exclude rules 
 # if needed on specific domains, however some rules should apply to all. 
 #
-# 3 rules that should always be applied. 
-# There are 3 gates that have to pass before a PR will merge. None of them
+# 4 gates that have to pass before a PR will merge. None of them
 # touch Snowflake — the jinja templater catches any DAG issues, dbt parse
 # catches broken ref() and source() references (it validates that every model
 # you reference actually exists in the DAG — so you find out at PR time, not
-# deploy time), and lint_all.py catches style + doctrine violations.
+# deploy time), lint_all.py catches style + doctrine violations, and
+# check_column_contracts.py catches column-level breaks (renamed/deleted
+# fields silently breaking downstream Alias.Object:Field references).
+#
+# Wide-layer regeneration is DEPLOY-TIME ONLY (customer_journey_deploy.yml).
+# The committed wide_layer/*.sql files are non-authoritative documentation —
+# deploy always regenerates them fresh from merged main. This removes the
+# two-PR race condition on auto-generated files entirely.
 #
 # The deploy/build to Snowflake lives in a SEPARATE workflow
 # (customer_journey_deploy.yml, push-to-main only). Keeping it separate means
@@ -120,73 +126,7 @@ jobs:
           echo "::error::Auto-fix pushed a formatting commit to this branch. A new run is evaluating the fixed code — check that run, not this one."
           exit 1
 
-  # ── Job 1: Auto-assembly check ─────────────────────────────────────────
-  # Snowflake's server-side dbt runtime gets an EMPTY file-list graph at
-  # compile time, so it CANNOT discover metric files and regenerate the wide
-  # layer — this has to run OUTSIDE Snowflake where the real file list is
-  # visible. If you added a metric to models/metric_layer/ but didn't
-  # regenerate the matching wide_layer/*.sql, this job self-heals it —
-  # same Design A pattern as Job 0 (auto-fix):
-  #
-  #   1. Run generate_wide_layer.py WITHOUT --check — this regenerates
-  #      models/wide_layer/*.sql from whatever metric files exist right now.
-  #   2. If that changed any committed wide_layer file, commit + push it
-  #      straight onto the PR branch, then exit 1 ON PURPOSE — same as Job 0,
-  #      this stops the current (now-stale) run and the push triggers a fresh
-  #      run that evaluates the regenerated, committed wide tables.
-  #   3. If nothing changed, the job just passes, same as before.
-  #
-  # This keeps the "committed wide_layer/*.sql must match git" contract
-  # (deliberate — the deploy workflow regenerates fresh too, but that's
-  # deploy-time truth, not what a PR reviewer sees; this makes both match).
-  #
-  # Manual/local equivalent if you don't want to wait on CI:
-  #   cd domains/CustomerJourney && python3 tools/generate_wide_layer.py
-  # then commit the regenerated models/wide_layer/*.sql yourself.
-  auto-assembly-check:
-    name: Wide-Layer Auto-Assembly Check
-    runs-on: ubuntu-latest
-    needs: auto-fix
-    if: github.event.pull_request.head.repo.full_name == github.repository
-    defaults:
-      run:
-        working-directory: ${{ github.workspace }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Regenerate wide layer from current metric files
-        working-directory: domains/CustomerJourney
-        run: python3 tools/generate_wide_layer.py
-      - name: Detect changed wide-layer files
-        id: diff
-        run: |
-          if git diff --quiet -- domains/CustomerJourney/models/wide_layer; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Commit and push regenerated wide layer
-        if: steps.diff.outputs.changed == 'true'
-        run: |
-          # Same github-actions[bot] identity as Job 0 — see the comment
-          # there for why a made-up bot name causes approval-gated runs.
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add domains/CustomerJourney/models/wide_layer
-          git commit -m "chore: regenerate wide layer (tools/generate_wide_layer.py)"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
-      - name: Fail this run (a re-run on the regenerated wide layer will be the real gate)
-        if: steps.diff.outputs.changed == 'true'
-        run: |
-          echo "::error::Wide layer was out of sync and has been regenerated + pushed to this branch. A new run is evaluating the fixed code — check that run, not this one."
-          exit 1
-
-  # ── Job 2: CAO Lint Gate ───────────────────────────────────────────────
+  # ── Job 1: CAO Lint Gate ───────────────────────────────────────────────
   # Runs lint_all.py, NOT raw `sqlfluff lint`. The Python wrapper does two
   # things raw sqlfluff can't:
   #
@@ -207,7 +147,7 @@ jobs:
   lint:
     name: CAO Lint Gate
     runs-on: ubuntu-latest
-    needs: auto-assembly-check
+    needs: auto-fix
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -217,6 +157,30 @@ jobs:
         run: pip install "sqlfluff>=2.0.0,<4.0.0"
       - name: CAO lint gate (colons/OBJECT-safe + identifier doctrine)
         run: python3 ../../tools/lint_all.py --domain CustomerJourney
+
+  # ── Job 2: Column-Contract Gate ────────────────────────────────────────
+  # Catches the failure dbt parse can't: a renamed/deleted field in an
+  # upstream model silently breaking every downstream Alias.Object:Field
+  # reference — previously only discovered at deploy time in Snowflake.
+  # Diff-scoped (only contracts of models changed in THIS PR are
+  # re-validated against their consumers), read-only, no secrets, no
+  # warehouse. Also hard-fails SELECT * over ref() — CAO doctrine, now
+  # machine-enforced.
+  #
+  # Needs fetch-depth: 0 so the diff against origin/main works.
+  column-contracts:
+    name: Column-Contract Gate
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Column-contract gate (diff-scoped, read-only)
+        run: python3 ../../tools/check_column_contracts.py --domain CustomerJourney
 
   # ── Job 3: dbt Compile ─────────────────────────────────────────────────
   # Validates Jinja + the DAG WITHOUT touching Snowflake. dbt parse catches
@@ -228,7 +192,7 @@ jobs:
   compile:
     name: dbt Compile
     runs-on: ubuntu-latest
-    needs: lint
+    needs: column-contracts
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
