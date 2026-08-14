@@ -29,6 +29,7 @@ SELECT
     , OBJECT_CONSTRUCT_KEEP_NULL('RnpsScore', RnpsScore.RnpsScore)::OBJECT(RnpsScore FLOAT) AS RnpsScore
     , OBJECT_CONSTRUCT_KEEP_NULL('TenureDays', TenureDays.TenureDays)::OBJECT(TenureDays NUMBER) AS TenureDays
     , OBJECT_CONSTRUCT_KEEP_NULL('TermType', TermType.TermType)::OBJECT(TermType VARCHAR) AS TermType
+    , OBJECT_CONSTRUCT_KEEP_NULL('TestMessyCiCheckFlag', TestMessyCiCheckFlag.TestMessyCiCheckFlag)::OBJECT(TestMessyCiCheckFlag NUMBER) AS TestMessyCiCheckFlag
 FROM {{ ref('PolicyRaw') }} AS Policy
 INNER JOIN {{ ref('AgentChangeCsatScore') }} AS AgentChangeCsatScore
     ON Policy.ID = AgentChangeCsatScore.ID
@@ -68,3 +69,5 @@ INNER JOIN {{ ref('TenureDays') }} AS TenureDays
     ON Policy.ID = TenureDays.ID
 INNER JOIN {{ ref('TermType') }} AS TermType
     ON Policy.ID = TermType.ID
+INNER JOIN {{ ref('TestMessyCiCheckFlag') }} AS TestMessyCiCheckFlag
+    ON Policy.ID = TestMessyCiCheckFlag.ID
