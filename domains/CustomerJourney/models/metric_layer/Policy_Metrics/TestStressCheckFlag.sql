@@ -5,10 +5,10 @@
 -- Owner: Retention Analytics
 -- Contract: 1 row per policy ID = 1:1
 
-select
+SELECT
     policy.*
-    ,case
-        when policy.Policy:cancellationdate is null then 1
-    else 0
-    end as teststresscheckflag
-from {{ ref('PolicyRaw') }} as policy
+    , CASE
+        WHEN policy.Policy:cancellationdate IS null THEN 1
+        ELSE 0
+    END AS teststresscheckflag
+FROM {{ ref('PolicyRaw') }} AS policy
