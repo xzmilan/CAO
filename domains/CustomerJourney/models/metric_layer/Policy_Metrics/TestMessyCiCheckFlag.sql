@@ -7,6 +7,6 @@
 -- Contract: 1 row per policy ID = 1:1.
 
 SELECT
-    policy.id
-    , CASE WHEN policy.policy:BusinessEntity = 'FARMERS' THEN 1 ELSE 0 END AS TestMessyCiCheckFlag
-FROM {{ ref('PolicyRaw') }} AS policy
+    Policy.id
+    , CASE WHEN Policy.Policy:BusinessEntity = 'FARMERS' THEN 1 ELSE 0 END AS TestMessyCiCheckFlag
+FROM {{ ref('PolicyRaw') }} AS Policy

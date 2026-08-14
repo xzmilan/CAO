@@ -8,17 +8,17 @@
 -- Pure SELECT from PolicyWide — no aggregation, no derivation logic.
 
 SELECT
-    policy.Policy:SystemIds:RtenPlcyCntrctNum AS PolicyNumber
-    , policy.Policy:BusinessEntity AS BusinessEntity
-    , policy.Policy:LineOfBusinessCode AS LineOfBusinessCode
-    , policy.Policy:PolicyStateCode AS PolicyStateCode
-    , policy.Policy:SourceSystemCode AS SourceSystemCode
-    , cast(policy.TenureDays:TenureDays AS NUMBER) AS TenureDays
-    , policy.TermType:TermType AS TermType
-    , policy.InceptionMonth:InceptionMonth AS InceptionMonth
-    , policy.NumberOfPoliciesInForce:NumberOfPoliciesInForce AS numberofpoliciesinforce
-    , policy.NumberOfZipChangeEvents:NumberOfZipChangeEvents AS NumberOfZipChangeEvents
-    , policy.NumberOfAgentChangeEvents:NumberOfAgentChangeEvents AS NumberOfAgentChangeEvents
-    , policy.TestMessyCiCheckFlag:TestMessyCiCheckFlag AS TestMessyCiCheckFlag
-FROM {{ ref('PolicyWide') }} AS policy
-WHERE policy.NumberOfPoliciesInForce:NumberOfPoliciesInForce > 0
+    Policy.Policy:SystemIds:RtenPlcyCntrctNum AS PolicyNumber
+    , Policy.Policy:BusinessEntity AS BusinessEntity
+    , Policy.Policy:LineOfBusinessCode AS LineOfBusinessCode
+    , Policy.Policy:PolicyStateCode AS PolicyStateCode
+    , Policy.Policy:SourceSystemCode AS SourceSystemCode
+    , cast(Policy.TenureDays:TenureDays AS NUMBER) AS TenureDays
+    , Policy.TermType:TermType AS TermType
+    , Policy.InceptionMonth:InceptionMonth AS InceptionMonth
+    , Policy.NumberOfPoliciesInForce:NumberOfPoliciesInForce AS NumberOfPoliciesInForce
+    , Policy.NumberOfZipChangeEvents:NumberOfZipChangeEvents AS NumberOfZipChangeEvents
+    , Policy.NumberOfAgentChangeEvents:NumberOfAgentChangeEvents AS NumberOfAgentChangeEvents
+    , Policy.TestMessyCiCheckFlag:TestMessyCiCheckFlag AS TestMessyCiCheckFlag
+FROM {{ ref('PolicyWide') }} AS Policy
+WHERE Policy.NumberOfPoliciesInForce:NumberOfPoliciesInForce > 0
