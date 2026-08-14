@@ -58,6 +58,13 @@ _DIALECT = "snowflake"
 # before parsing (it is Jinja, not SQL), keep the rest of the body.
 _CONFIG_BLOCK_RE = re.compile(r"^\s*\{\{\s*config\s*\(.*?\)\s*\}\}", re.DOTALL)
 
+# FROM/JOIN ref('X') AS Alias — shared with lint gate and METRIC-INNER-JOIN check
+_FROM_JOIN_REF_RE = re.compile(
+    r"(?:FROM|JOIN)\s+\{\{\s*ref\(\s*['\"]([\w]+)['\"]\s*\)\s*\}\}"
+    r"(?:\s+AS\s+)?\s*([A-Za-z_][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
+
 
 # ── Jinja protection (identical technique to MESA) ───────────────────────────
 _JINJA_RE = re.compile(r"\{\{.*?\}\}", re.DOTALL)
@@ -467,6 +474,251 @@ def check_identifier_doctrine(sql: str) -> list[dict]:
     return violations
 
 
+# ── NO-SUBQUERY-JOIN check ───────────────────────────────────────────────────
+def check_subquery_in_join_where(sql: str) -> list[dict]:
+    """
+    Detect SELECT inside parenthesized expressions that are arguments to JOIN
+    or WHERE (excluding CTE definitions: WITH Name AS (SELECT...)).
+    Returns violations as {"rule": "NO-SUBQUERY-JOIN", "message": ...}.
+    """
+    violations: list[dict] = []
+
+    # Protect jinja and casts so their internals don't produce false tokens
+    protected, _ = _protect_jinja(sql)
+    protected, _ = _extract_object_casts(protected)
+
+    # Remove single-line comments (-- ...)
+    lines = protected.split("\n")
+    cleaned_lines = []
+    for line in lines:
+        stripped = line.lstrip()
+        if stripped.startswith("--"):
+            cleaned_lines.append("")
+        else:
+            cleaned_lines.append(line)
+    cleaned = "\n".join(cleaned_lines)
+
+    # Scan with balanced-paren tracking
+    i = 0
+    n = len(cleaned)
+
+    while i < n:
+        # Look for JOIN( or WHERE( pattern
+        m = re.search(r"\b(JOIN|WHERE)\s*\(", cleaned[i:], re.IGNORECASE)
+        if not m:
+            break
+
+        keyword = m.group(1).upper()
+        paren_pos = i + m.end() - 1  # position of '(' in cleaned
+        inner_start = i + m.end()  # position just after '('
+
+        # Check if this is part of a CTE definition: WITH ident AS (
+        # Look backwards from paren_pos for "AS" preceded by identifier
+        # preceded by WITH or comma
+        before_paren = cleaned[:paren_pos].rstrip()
+        before_tokens = before_paren.split()
+        if len(before_tokens) >= 3:
+            if (before_tokens[-1].upper() == "AS"
+                    and before_tokens[-2].upper() not in (
+                        "CAST", "SAFE_CAST", "TRY_CAST",
+                        "OBJECT_CONSTRUCT", "OBJECT_CONSTRUCT_KEEP_NULL",
+                    )
+                    and (before_tokens[-3].upper() == "WITH"
+                         or before_tokens[-3] == ",")):
+                # This is a CTE definition — skip
+                i = paren_pos + 1
+                continue
+
+        # Balanced-paren scan from '('
+        depth = 1
+        j = inner_start
+        while j < n and depth > 0:
+            ch = cleaned[j]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            j += 1
+
+        inner = cleaned[inner_start:j - 1]
+
+        # Check if SELECT appears inside
+        if re.search(r"\bSELECT\b", inner, re.IGNORECASE):
+            lineno = cleaned[:paren_pos].count("\n") + 1
+            violations.append({
+                "rule": "NO-SUBQUERY-JOIN",
+                "message": (
+                    f"Subquery inside {keyword} detected at line {lineno} — "
+                    "convert to a CTE (see SP_SQLStandards.md 'Subqueries' row). "
+                    "Subqueries in JOIN/WHERE are banned; extract to "
+                    "WITH <Name> AS (...) and reference the CTE name instead."
+                ),
+            })
+
+        i = j  # continue scanning after this paren block
+
+    return violations
+
+
+# ── FIELD-PREFIX-WARN (multi-table bare-column detector) ─────────────────────
+def check_missing_field_prefix(sql: str, alias_map: dict[str, str]) -> list[dict]:
+    """
+    Detect bare column references in multi-table queries (WARN only).
+    Only runs when alias_map has 2+ entries (a single-table query has
+    no ambiguity, skip entirely).
+    """
+    warnings: list[dict] = []
+    if len(alias_map) < 2:
+        return warnings  # single-table — no ambiguity
+
+    # Protect jinja and casts
+    protected, _ = _protect_jinja(sql)
+    protected, _ = _extract_object_casts(protected)
+
+    # SQL keywords/functions that look like column refs but aren't
+    _SQL_KEYWORDS = frozenset({
+        "select", "from", "where", "join", "on", "and", "or", "as", "in", "is",
+        "not", "null", "true", "false", "case", "when", "then", "else", "end",
+        "cast", "safe_cast", "try_cast", "count", "sum", "avg", "min", "max",
+        "coalesce", "if", "iff", "current_date", "current_timestamp",
+        "datediff", "dateadd", "upper", "lower", "trim", "concat",
+        "left", "right", "inner", "outer", "full", "cross",
+        "group", "order", "by", "having", "limit", "offset",
+        "union", "all", "distinct", "exists", "between", "like", "ilike",
+        "substr", "to_varchar", "to_number", "to_date", "zeroifnull",
+        "array_agg", "object_construct", "object_construct_keep_null",
+        "struct", "array", "flatten", "lateral", "with", "id",
+        # SQL types that appear in _extract_object_casts placeholder tokens
+        "variant", "object", "varchar", "number", "float", "boolean",
+        "date", "timestamp", "timestamp_ntz", "timestamp_ltz", "timestamp_tz",
+        "integer", "int", "decimal", "numeric", "char", "text", "string",
+    })
+
+    # Also skip known alias names — those are table references, not bare columns
+    known_aliases = frozenset(a.lower() for a in alias_map.keys())
+
+    lines = protected.split("\n")
+    in_select = False
+    for i, line in enumerate(lines):
+        lineno = i + 1
+        stripped = line.lstrip()
+        if stripped.startswith("--"):
+            continue
+
+        upper = stripped.upper()
+        if upper.startswith("SELECT"):
+            in_select = True
+            continue
+        if (upper.startswith("FROM") or upper.startswith("JOIN")
+                or upper.startswith("WHERE") or upper.startswith("GROUP")
+                or upper.startswith("ORDER") or upper.startswith("HAVING")
+                or upper.startswith("LIMIT")):
+            in_select = False
+            continue
+
+        if not in_select:
+            continue
+
+        # Remove string literals, jinja placeholders, protected tokens
+        no_strings = re.sub(r"'[^']*'", "''", line)
+        no_strings = re.sub(r"JINJA_PLACEHOLDER__\d+__", "", no_strings)
+        no_strings = re.sub(r"SF_OBJECTCAST__\d+__", "", no_strings)
+        no_strings = re.sub(r"__SF_COLON__\d+__", "", no_strings)
+
+        # Remove function calls: Name(...) → skip those identifiers
+        no_funcs = re.sub(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", " ", no_strings)
+
+        # Find remaining bare words
+        for word_match in re.finditer(r"\b([A-Za-z_][A-Za-z0-9_]*)\b", no_funcs):
+            word = word_match.group(1)
+            word_lower = word.lower()
+            if word_lower in _SQL_KEYWORDS:
+                continue
+            if word_lower in known_aliases:
+                continue
+            # Skip if it's prefixed with a dot (already qualified)
+            col_pos = word_match.start()
+            if col_pos > 0 and no_funcs[col_pos - 1] == ".":
+                continue
+            # Skip if followed by a dot (its a table alias, not a bare column)
+            if (col_pos + len(word) < len(no_funcs)
+                    and no_funcs[col_pos + len(word)] == "."):
+                continue
+
+            warnings.append({
+                "rule": "FIELD-PREFIX-WARN",
+                "message": (
+                    f"Bare column '{word}' at line {lineno} — prefix with "
+                    f"table alias (e.g. Alias.{word}) for clarity in "
+                    f"multi-table queries."
+                ),
+            })
+
+    return warnings
+
+
+# ── METRIC-INNER-JOIN cross-file check ───────────────────────────────────────
+def check_metric_inner_join(models: dict, domain_dir) -> list[dict]:
+    """
+    Check that metric-layer models use INNER JOIN (not LEFT/RIGHT) when joining
+    to other metric-layer models. LEFT JOIN to a local CTE is correct
+    (zero-fill pattern), and LEFT JOIN to raw_layer is also legitimate
+    (different grain — e.g. event-grain metric joining to policy-grain raw).
+
+    This rule only fires on LEFT/RIGHT JOIN {{ ref(...) }} where the ref
+    target resolves to a model under metric_layer/.
+
+    Args:
+        models: {model_name: Path} dict from discover_models()
+        domain_dir: Path to the domain directory
+    """
+    violations: list[dict] = []
+    metric_dir = Path(domain_dir) / "models" / "metric_layer"
+    if not metric_dir.is_dir():
+        return violations
+
+    pattern = re.compile(
+        r"(LEFT\s+JOIN|RIGHT\s+JOIN)\s+"
+        r"\{\{\s*ref\(\s*['\"]([\w]+)['\"]\s*\)\s*\}\}",
+        re.IGNORECASE,
+    )
+
+    for sql_file in sorted(metric_dir.rglob("*.sql")):
+        sql = sql_file.read_text()
+        rel = str(sql_file.relative_to(domain_dir))
+        lines = sql.split("\n")
+
+        for i, line in enumerate(lines, 1):
+            if line.lstrip().startswith("--"):
+                continue
+            for m in pattern.finditer(line):
+                join_type = m.group(1).upper()
+                ref_name = m.group(2)
+
+                # Only flag if the ref target is also a metric-layer model
+                # (LEFT JOIN to raw_layer is legitimate zero-fill at different grain)
+                if ref_name not in models:
+                    continue
+                ref_path = str(models[ref_name])
+                if "metric_layer" not in ref_path.replace("\\", "/"):
+                    continue
+
+                violations.append({
+                    "rule": "METRIC-INNER-JOIN",
+                    "message": (
+                        f"{join_type} to ref('{ref_name}') in {rel} line {i} — "
+                        f"standard requires INNER JOIN (plain JOIN) when a "
+                        f"metric joins to another metric on the same grain, "
+                        f"not LEFT/RIGHT. If you intended a zero-fill pattern, "
+                        f"join to a CTE, not directly to a ref(). "
+                        f"(LEFT JOIN to raw_layer is exempt — different grain "
+                        f"zero-fill is legitimate.)"
+                    ),
+                })
+
+    return violations
+
+
 # ── Header comment ───────────────────────────────────────────────────────────
 _HEADER_RE = re.compile(r"^\s*--\s*(MESA|CAO|METRIC|RAW ENTITY|WIDE LAYER)", re.MULTILINE | re.IGNORECASE)
 
@@ -598,6 +850,15 @@ def lint_snowflake_sql(
 
     # 1. CAO identifier doctrine (the CP02 replacement)
     findings.extend(check_identifier_doctrine(sql))
+
+    # 1b. NO-SUBQUERY-JOIN (single-file check)
+    findings.extend(check_subquery_in_join_where(sql))
+
+    # 1c. FIELD-PREFIX-WARN (multi-table only, WARN level — never fails gate)
+    _alias_map: dict[str, str] = {}
+    for _m in _FROM_JOIN_REF_RE.finditer(sql):
+        _alias_map[_m.group(2)] = _m.group(1)
+    findings.extend(check_missing_field_prefix(sql, _alias_map))
 
     # 2. sqlfluff lint (not fix) with protections
     try:
