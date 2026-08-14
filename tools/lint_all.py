@@ -40,6 +40,9 @@ CAO_ROOT = TOOLS_DIR.parent
 sys.path.insert(0, str(TOOLS_DIR))
 
 from sql_formatter_snowflake import lint_snowflake_sql  # noqa: E402
+from rule_help import print_help_for_rules  # noqa: E402
+from check_column_contracts import discover_models  # noqa: E402
+from sql_formatter_snowflake import check_metric_inner_join  # noqa: E402
 
 CONFIG = CAO_ROOT / ".sqlfluff"
 
@@ -60,19 +63,49 @@ def main() -> int:
 
     total = 0
     failed = 0
+    rules_seen: set[str] = set()
     for f in sql_files:
         rel = f.relative_to(domain_dir)
         findings = lint_snowflake_sql(f.read_text(), str(CONFIG), file_path=str(rel))
         if findings:
-            failed += 1
-            total += len(findings)
-            print(f"FAIL {rel}  ({len(findings)} findings)")
-            for x in findings:
-                print(f"      [{x['rule']}] {x['message'][:100]}")
+            # FIELD-PREFIX-WARN is WARN-level — never fails the gate
+            hard_findings = [x for x in findings if x["rule"] != "FIELD-PREFIX-WARN"]
+            warn_findings = [x for x in findings if x["rule"] == "FIELD-PREFIX-WARN"]
+            if hard_findings:
+                failed += 1
+                total += len(hard_findings)
+                print(f"FAIL {rel}  ({len(hard_findings)} hard findings)")
+                for x in hard_findings:
+                    print(f"      [{x['rule']}] {x['message'][:100]}")
+                    rules_seen.add(x["rule"])
+            if warn_findings:
+                total += len(warn_findings)
+                print(f"WARN {rel}  ({len(warn_findings)} FIELD-PREFIX-WARN)")
+                for x in warn_findings[:5]:  # max 5 WARNs printed per file
+                    print(f"      [{x['rule']}] {x['message'][:100]}")
+                if len(warn_findings) > 5:
+                    print(f"      ... and {len(warn_findings) - 5} more FIELD-PREFIX-WARN")
+                rules_seen.add("FIELD-PREFIX-WARN")
+            if not hard_findings and not warn_findings:
+                print(f"ok   {rel}")
         else:
             print(f"ok   {rel}")
 
     print(f"\nSUMMARY: {failed}/{len(sql_files)} files with findings, {total} total")
+
+    # ── Second pass: cross-file METRIC-INNER-JOIN check (metric_layer/ only) ──
+    models_dict = discover_models(args.domain)
+    metric_violations = check_metric_inner_join(models_dict, domain_dir)
+    if metric_violations:
+        print("\nMETRIC-INNER-JOIN violations:")
+        failed += len(metric_violations)
+        total += len(metric_violations)
+        for v in metric_violations:
+            print(f"      [{v['rule']}] {v['message'][:120]}")
+            rules_seen.add(v["rule"])
+
+    if failed:
+        print_help_for_rules(rules_seen)
     return 1 if failed else 0
 
 
