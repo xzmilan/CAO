@@ -6,7 +6,7 @@
 -- Snowflake account. Safe to delete after the test PR closes.
 -- Contract: 1 row per policy ID = 1:1.
 
-select
-      policy.id
-    ,case when policy.policy:BusinessEntity = 'FARMERS' then 1 else 0 end as TestMessyCiCheckFlag
-from {{ ref('PolicyRaw') }} as policy
+SELECT
+    policy.id
+    , CASE WHEN policy.policy:BusinessEntity = 'FARMERS' THEN 1 ELSE 0 END AS TestMessyCiCheckFlag
+FROM {{ ref('PolicyRaw') }} AS policy
