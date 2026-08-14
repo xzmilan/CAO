@@ -36,6 +36,12 @@ Public API:
 
 For other dialects (redshift, bigquery, duckdb): copy this file, change
 _DIALECT and the _protect_* helpers for that dialect's unusual syntax.
+
+  NOTE (2026-08): _extract_object_casts, _COLON_FIELD_RE, and
+  _protect_jinja are now load-bearing in THREE places — this formatter,
+  lint_all.py, and tools/check_column_contracts.py (the PR column-contract
+  gate). Any change to these helpers must be regression-tested against all
+  three consumers before merge.
 """
 
 from __future__ import annotations
