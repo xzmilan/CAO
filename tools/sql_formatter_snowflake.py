@@ -461,6 +461,145 @@ def check_identifier_doctrine(sql: str) -> list[dict]:
     return violations
 
 
+# ── Identifier-case auto-fix (safe, scoped — NOT the same as CP02) ───────────
+# check_identifier_doctrine() above only DETECTS violations. This section
+# actually FIXES the common, low-risk case: a table alias or metric alias
+# declared/used in the wrong case (e.g. `AS policy` / `policy.Field` instead
+# of `AS Policy` / `Policy.Field`).
+#
+# WHY THIS IS SAFE (unlike enabling sqlfluff's CP02):
+#   1. We NEVER guess a new spelling out of thin air. We only rename to a
+#      casing that ALREADY EXISTS elsewhere in the same file — e.g. if
+#      `policy` is used as a lowercase table alias but the same file already
+#      has `Policy.Policy:BusinessEntity` (the correctly-cased OBJECT key),
+#      we rename the alias to match that existing, proven-correct spelling.
+#      If no such existing correct spelling can be found, we fall back to a
+#      simple capitalize-first-letter (which still satisfies the doctrine
+#      check, since it only requires "starts uppercase, no underscore" —
+#      see _is_pascal_case) rather than inventing anything cleverer.
+#   2. Renames are WHOLE-WORD (\b...\b) and EXACT-CASE matches of the
+#      violating spelling only — "policy" gets renamed, "Policy" (already
+#      correct) is left untouched. This is what makes it safe to run
+#      file-wide instead of just fixing the single declaration site.
+#   3. String literals ('...') and comments are protected before the rename
+#      regex runs, same technique as _protect_jinja — so a business value
+#      that happens to match the word (e.g. WHERE Foo = 'policy') is never
+#      touched.
+#   4. Never touches `ID` or ALL-CAPS raw source columns (PLCY_CNTRCT_NUM
+#      etc.) — check_identifier_doctrine() already excludes those from being
+#      flagged as violations in the first place, so they never reach here.
+
+_STRING_LITERAL_RE = re.compile(r"'[^']*'")
+_STRING_PLACEHOLDER = "STRLIT_PLACEHOLDER__{idx}__"
+_STRING_PLACEHOLDER_RE = re.compile(r"STRLIT_PLACEHOLDER__(\d+)__")
+
+
+def _protect_string_literals(text: str) -> tuple[str, list[str]]:
+    tokens: list[str] = []
+
+    def replacer(m: re.Match) -> str:
+        tokens.append(m.group(0))
+        return _STRING_PLACEHOLDER.format(idx=len(tokens) - 1)
+
+    return _STRING_LITERAL_RE.sub(replacer, text), tokens
+
+
+def _restore_string_literals(text: str, tokens: list[str]) -> str:
+    return _STRING_PLACEHOLDER_RE.sub(lambda m: tokens[int(m.group(1))], text)
+
+
+def _derive_canonical_casing(name: str, sql: str) -> str | None:
+    """
+    Find how `name` is ALREADY correctly spelled elsewhere in this same file
+    (case-insensitive search, case-sensitive comparison against the doctrine),
+    and return the most frequent such correct spelling. Returns None only if
+    no existing correct spelling is found AND a safe fallback can't be made
+    (e.g. the name contains an underscore, which capitalize-first-letter
+    cannot fix and which signals a different kind of naming problem that
+    should stay lint-only rather than be auto-rewritten).
+    """
+    variant_re = re.compile(rf"\b{re.escape(name)}\b", re.IGNORECASE)
+    counts: dict[str, int] = {}
+    for m in variant_re.finditer(sql):
+        found = m.group(0)
+        if found == name:
+            continue  # this is the violation itself, not a correct spelling
+        if _is_pascal_case(found) or _is_allowed_upper(found):
+            counts[found] = counts.get(found, 0) + 1
+    if counts:
+        # Most frequent existing correct spelling wins; ties broken by
+        # first-seen order via max() with a stable dict (Python 3.7+).
+        return max(counts, key=lambda k: counts[k])
+    if "_" in name:
+        return None  # underscore issue — different problem, stays lint-only
+    return name[0].upper() + name[1:]
+
+
+def _rename_identifier_everywhere(sql: str, old_name: str, new_name: str) -> str:
+    """
+    Rename every exact-case, whole-word occurrence of `old_name` to
+    `new_name`, skipping -- line comments, /* block comments */, and
+    '...' string literals. Case-sensitive: only the exact violating
+    spelling is touched, so already-correct spellings of the same word
+    are never affected.
+    """
+    rename_re = re.compile(rf"\b{re.escape(old_name)}\b")
+    out_lines: list[str] = []
+    in_block_comment = False
+    for line in sql.split("\n"):
+        stripped = line.lstrip()
+        if in_block_comment:
+            if "*/" in line:
+                in_block_comment = False
+            out_lines.append(line)
+            continue
+        if stripped.startswith("/*"):
+            if "*/" not in line:
+                in_block_comment = True
+            out_lines.append(line)
+            continue
+        if stripped.startswith("--"):
+            out_lines.append(line)
+            continue
+        # Split off a trailing inline comment (if any) so the rename never
+        # touches text after `--` on an otherwise-code line.
+        code_part, _, comment_part = line.partition("--")
+        protected, str_tokens = _protect_string_literals(code_part)
+        protected = rename_re.sub(new_name, protected)
+        code_part = _restore_string_literals(protected, str_tokens)
+        out_lines.append(code_part + ("--" + comment_part if comment_part or "--" in line else ""))
+    return "\n".join(out_lines)
+
+
+def apply_identifier_doctrine_fixes(sql: str) -> tuple[str, list[dict]]:
+    """
+    Auto-fix the identifier-case violations that check_identifier_doctrine()
+    can safely correct (see module notes above). Returns (fixed_sql, applied)
+    where `applied` is a list of {rule, old_name, new_name, message} for
+    every rename actually made — distinct from the "suggestions" concept
+    elsewhere in this file, because these ARE applied, not just suggested.
+
+    Any violation this function can't safely resolve (e.g. a name with an
+    underscore) is left untouched — it will still show up in
+    check_identifier_doctrine()'s findings, unchanged, for a human to fix.
+    """
+    violations = check_identifier_doctrine(sql)
+    distinct_names = sorted({v["name"] for v in violations})
+    fixed_sql = sql
+    applied: list[dict] = []
+    for name in distinct_names:
+        new_name = _derive_canonical_casing(name, fixed_sql)
+        if new_name and new_name != name:
+            fixed_sql = _rename_identifier_everywhere(fixed_sql, name, new_name)
+            applied.append({
+                "rule": "CAO-IDENTIFIER-CASE-AUTOFIX",
+                "old_name": name,
+                "new_name": new_name,
+                "message": f"APPLIED: renamed alias '{name}' -> '{new_name}' to satisfy CAO identifier doctrine.",
+            })
+    return fixed_sql, applied
+
+
 # ── Header comment ───────────────────────────────────────────────────────────
 _HEADER_RE = re.compile(r"^\s*--\s*(MESA|CAO|METRIC|RAW ENTITY|WIDE LAYER)", re.MULTILINE | re.IGNORECASE)
 
@@ -517,10 +656,17 @@ def format_snowflake_sql(
     """
     Cosmetically normalize SQL and return semantic suggestions.
 
-    Tier 1 (applied):  sqlfluff fix (CP01/CP03/AL/LT — NOT CP02), header comment.
+    Tier 1 (applied):  sqlfluff fix (CP01/CP03/AL/LT — NOT CP02), header comment,
+                       PLUS the scoped identifier-case auto-fix (renames a
+                       misspelled-case alias to a casing already proven correct
+                       elsewhere in the file — see apply_identifier_doctrine_fixes
+                       docstring for exactly why this is safe and CP02 is not).
     Tier 2 (returned): semantic suggestions — NEVER auto-applied.
 
-    Identifier case doctrine is enforced separately via check_identifier_doctrine().
+    Any identifier violation the auto-fix can't safely resolve (e.g. a name
+    with an underscore, or no existing correct spelling to copy from) is left
+    for check_identifier_doctrine() to report as a lint failure — this
+    function only fixes the safe subset, never invents a new name.
 
     Args:
         sql:         Raw SQL to format.
@@ -542,6 +688,12 @@ def format_snowflake_sql(
     except Exception:
         formatted = sql
 
+    identifier_fixes: list[dict] = []
+    try:
+        formatted, identifier_fixes = apply_identifier_doctrine_fixes(formatted)
+    except Exception:
+        pass
+
     try:
         formatted = _add_header_comment(formatted, object_name)
     except Exception:
@@ -552,7 +704,10 @@ def format_snowflake_sql(
     except Exception:
         suggestions = []
 
-    return formatted, suggestions
+    # Applied identifier renames are reported alongside suggestions so
+    # fix_all.py's existing "[suggestion] ..." print picks them up too —
+    # they're distinguished by rule=CAO-IDENTIFIER-CASE-AUTOFIX vs SUGGEST-00N.
+    return formatted, identifier_fixes + suggestions
 
 
 def lint_snowflake_sql(
