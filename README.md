@@ -16,7 +16,7 @@ CAO/
         ├── dbt_project.yml
         ├── profiles.yml
         ├── models/           # raw_layer / metric_layer / wide_layer / view_layer
-        ├── macros/  tests/
+        ├── seeds/  macros/  tests/
         └── tools/
             └── generate_wide_layer.py   # wide-table auto-assembly
 ```
@@ -41,3 +41,8 @@ CAO/
    `snow dbt deploy --temporary-connection` and runs the build.
    (Currently gated `if: false` until Snowflake is reachable from CI runners.)
 
+## Docs
+
+Business-requirement docs, JO CSVs, and Snowflake discovery diagnostics are
+kept **local-only** (not committed) — see the sibling `FarmersContract/docs/`
+working folder. This repo is code + CI only.

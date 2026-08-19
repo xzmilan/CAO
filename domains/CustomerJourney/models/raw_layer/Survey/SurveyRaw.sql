@@ -38,7 +38,7 @@ WITH AgentChangeResponses AS (
 , AgentChangeCampaign AS (
     SELECT
         'AGENT_CHANGE' AS SurveyType
-        , DATE_TRUNC('month', AgentChangeInvite.UPLOAD_DT) AS InviteWave
+        , DATE_TRUNC('month', AgentChangeInvite.INVITE_PULL_DATE) AS InviteWave
         , COUNT(DISTINCT AgentChangeInvite.POLICY_NUMBER) AS InvitesSent
         , ARRAY_AGG(
             OBJECT_CONSTRUCT_KEEP_NULL(
@@ -74,15 +74,9 @@ WITH AgentChangeResponses AS (
     FROM {{ source('tnps', 'agtchg_invites_sent') }} AS AgentChangeInvite
     LEFT JOIN AgentChangeResponses
         ON AgentChangeInvite.POLICY_NUMBER = AgentChangeResponses.PolicyNumber
-    {% if is_incremental() %}
-    WHERE DATE_TRUNC('month', AgentChangeInvite.UPLOAD_DT) >= DATEADD(
-        'month', -3,
-        (SELECT COALESCE(MAX(SurveyRawPrev.Survey:InviteWave::DATE), CURRENT_DATE) FROM {{ this }} AS SurveyRawPrev)
-    )
-    {% endif %}
     GROUP BY
         'AGENT_CHANGE'
-        , DATE_TRUNC('month', AgentChangeInvite.UPLOAD_DT)
+        , DATE_TRUNC('month', AgentChangeInvite.INVITE_PULL_DATE)
 )
 
 SELECT

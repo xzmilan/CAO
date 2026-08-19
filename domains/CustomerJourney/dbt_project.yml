@@ -6,9 +6,6 @@ profile: customer_journey
 model-paths: ["models"]
 seed-paths: ["seeds"]
 
-vars:
-  dev_row_limit: 10
-
 seeds:
   customer_journey:
     seed_policy:
@@ -21,19 +18,10 @@ models:
     raw_layer:
       +materialized: table
       Policy:
-        +materialized: incremental
-        +incremental_strategy: merge
-        +unique_key: ID
         +schema: RAW_POLICY
       ChangeEvent:
-        +materialized: incremental
-        +incremental_strategy: merge
-        +unique_key: ID
         +schema: RAW_CHANGE_EVENT
       Survey:
-        +materialized: incremental
-        +incremental_strategy: merge
-        +unique_key: ID
         +schema: RAW_SURVEY
       Contact:
         +schema: RAW_CONTACT

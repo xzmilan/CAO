@@ -17,18 +17,6 @@ models:
         never bare natural keys downstream.
       - Latest transaction quarantined via ROW_NUMBER per policy (EFF_DT,
         SRC_TRANS_TMSP tiebreak).
-      - PolicyStats enrichment quarantined to the CURRENT SCD2 row via
-        CurrentPolicyStats CTE (END_DT_TMSP = '2999-12-31' sentinel — verified
-        against prod 2026-08-17 — plus ROW_NUMBER backstop, since some
-        policies carry more than one open row), so the historical
-        fdr_mdm_plcy_stats table can't fan out the one-row-per-policy grain.
-      - Materialized incremental (merge, unique_key=ID) — only re-derives the
-        LatestTransaction CTE for policies with a transaction newer than the
-        LastTransactionTmsp watermark, and CurrentPolicyStats for policies
-        with a PolicyStats SRC_TRANS_TMSP newer than the LastPolicyStatsTmsp
-        watermark; the outer Policy scan and PolicyMonthlyHistory join remain
-        full-scan (no reliable per-row watermark column exists on those
-        sources).
     meta:
       business_steward: "TBD"
       technical_steward: "Steve Passanante"
@@ -57,10 +45,6 @@ models:
       - ZIP detection on RESDC_ZIP_5_CD (never ZIP+4 — mail-routing noise).
       - AGENT detection on AGT_OF_RECRD_NUM LAG comparison.
       - Policy link carried in OBJECT(ID) — join via Policy:ID::VARCHAR.
-      - Materialized incremental (merge, unique_key=ID) — RankedTransactions
-        scopes to policies with activity past the watermark (full LAG history
-        per policy, to avoid a false-null previous-value at the boundary);
-        the final SELECT then filters to genuinely new events only.
     meta:
       business_steward: "TBD"
       technical_steward: "Steve Passanante"
@@ -75,25 +59,17 @@ models:
           - unique
       - name: EventType
         description: Event discriminator — ZIP_CHANGE or AGENT_CHANGE (nested in ChangeEvent OBJECT; column-level tests unsupported for OBJECT fields. See data test in tests/)
+          - unique
+      - name: EventType
+        description: Event discriminator — ZIP_CHANGE or AGENT_CHANGE (nested in ChangeEvent OBJECT; column-level tests unsupported for OBJECT fields)
 
   - name: SurveyRaw
     description: |
       ## Purpose
       RAW ENTITY: Survey — one row per survey campaign/invite wave.
-      Responses nested as typed ARRAY of OBJECTs.
-
-      ## Build status (as of 2026-08-17)
-      Only the AGENT_CHANGE campaign type (tnps.agtchg_invites_sent +
-      qualtrics.agentchange_responses) is implemented today. NEW_BUSINESS,
-      RENEWAL, RNPS, and CSS_CES campaign types are declared as sources
-      (see models/sources/tnps.yml, models/sources/qualtrics.yml) but have
-      NO corresponding CTE in this file yet — this is a documented scope
-      gap, not a bug. When those are built, the renewal invite source
-      (tnps.renewal_invites, 9.8M rows) will become the largest single
-      scan in this file and MUST get the same data-anchored rolling
-      lookback pattern used for AgentChangeCampaign (see Issue #5 in
-      SPEC_CAO_INCREMENTAL_RAW_LAYER_HARDENING.md) from day one — do not
-      ship it as a full-scan CTE and retrofit later.
+      Responses nested as typed ARRAY of OBJECTs. THE CONTRACT for all
+      survey data (Qualtrics: agent change, new business, renewal,
+      RNPS, CSS CES).
 
       ## Business Rules
       - ID = BASE64_ENCODE(SHA2(SurveyType|InviteWave, 256)).
@@ -103,12 +79,6 @@ models:
       - System IDs in typed OBJECTs (SystemIds) — never bare natural keys.
       - Agent change details (meets needs, received letter, days without agent)
         in typed OBJECT (AgentChangeDetails).
-      - Materialized incremental (merge, unique_key=ID) — 3-month rolling
-        lookback on AgentChangeCampaign so late-arriving responses re-trigger
-        a MERGE/overwrite of an already-materialized campaign-month row.
-        The lookback is anchored to the max materialized InviteWave in this
-        table (not CURRENT_DATE), so a delayed/skipped run self-heals instead
-        of silently aging late-arriving responses out of the window.
     meta:
       business_steward: "TBD"
       technical_steward: "Steve Passanante"
@@ -145,7 +115,6 @@ models:
       prc_classification: "Internal_Confidential"
       grain: "contact_identity"
       entity: "Contact"
-      build_status: "scaffold_pending_join_diagnosis"
     columns:
       - name: ID
         description: Hashed surrogate key over natural key ApexContactId.

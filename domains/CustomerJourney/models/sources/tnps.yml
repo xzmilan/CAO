@@ -32,9 +32,9 @@ sources:
               join to Qualtrics responses (POLICY_NUMBER_1) and to PolicyRaw.
             meta:
               declared_because: "join_key"
-          - name: UPLOAD_DT
+          - name: INVITE_PULL_DATE
             description: |
-              When the invite batch was uploaded/sent. SurveyRaw truncates
+              When the invite batch was pulled/sent. SurveyRaw truncates
               this to month to define the campaign wave.
             meta:
               declared_because: "usage_rule"
@@ -50,9 +50,9 @@ sources:
               and PolicyRaw.
             meta:
               declared_because: "join_key"
-          - name: UPLOAD_DT
+          - name: INVITE_PULL_DATE
             description: |
-              When the invite batch was uploaded/sent.
+              When the invite batch was pulled/sent.
             meta:
               declared_because: "usage_rule"
 
@@ -67,8 +67,8 @@ sources:
               and PolicyRaw.
             meta:
               declared_because: "join_key"
-          - name: UPLOAD_DT
+          - name: INVITE_PULL_DATE
             description: |
-              When the invite batch was uploaded/sent.
+              When the invite batch was pulled/sent.
             meta:
               declared_because: "usage_rule"

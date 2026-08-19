@@ -9,13 +9,13 @@
 # Replace @xzmilan with the real GitHub username/team as the platform grows.
 
 # Default owner for everything.
-*  @STEVEN-PASSANANTE_farmers
+*  @xzmilan
 
 # Each domain is owned explicitly — add a line per new domain under domains/.
-/domains/CustomerJourney/  @STEVEN-PASSANANTE_farmers
+/domains/CustomerJourney/  @xzmilan
 
 # The CI pipeline — changes to what gates a merge are high-risk.
-/.github/workflows/  @STEVEN-PASSANANTE_farmers
+/.github/workflows/  @xzmilan
 
 # Shared lint rules — loosening a rule here weakens every domain's PR gate.
-/.sqlfluff  @STEVEN-PASSANANTE_farmers
+/.sqlfluff  @xzmilan

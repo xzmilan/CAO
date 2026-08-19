@@ -3,11 +3,10 @@ customer_journey:
   outputs:
     dev:
       type: snowflake
-      account: FARMERS-AWSUSEAST2
-      user: STEVEN.PASSANANTE@CONTRACTOR.FARMERSINSURANCE.COM
-      authenticator: externalbrowser
-      database: PRD_BIZDB_PL_MARKETING
-      schema: CUSTOMERJOURNEY
-      warehouse: PRD_IT_EBI_WH
-      role: FARMERS OKTA SFLAKE_ WKSP_PL_MARKETING_RW
+      account: 'not needed'
+      user: 'not needed'
+      database: CUSTOMER_JOURNEYS
+      schema: JOURNEY
+      warehouse: COMPUTE_WH
+      role: ACCOUNTADMIN
       threads: 8

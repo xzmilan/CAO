@@ -13,48 +13,10 @@ WITH LatestTransaction AS (
         PolicyTransaction.PLCY_CNTRCT_NUM
         , PolicyTransaction.SRC_SYS_CD AS SourceSystemCode
         , PolicyTransaction.RESDC_ZIP_5_CD AS ZipCode
-        , PolicyTransaction.SRC_TRANS_TMSP AS LatestTransactionTimestamp
     FROM {{ source('rten', 'rten_dim_pl_trn_xlob') }} AS PolicyTransaction
-    {% if is_incremental() %}
-    WHERE PolicyTransaction.SRC_TRANS_TMSP > (
-        SELECT COALESCE(MAX(PolicyRawPrev.Policy:SystemIds:LastTransactionTmsp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
-        FROM {{ this }} AS PolicyRawPrev
-    )
-    {% endif %}
     QUALIFY ROW_NUMBER() OVER (
         PARTITION BY PolicyTransaction.PLCY_CNTRCT_NUM
         ORDER BY PolicyTransaction.EFF_DT DESC, PolicyTransaction.SRC_TRANS_TMSP DESC
-    ) = 1
-)
-
-, CurrentPolicyStats AS (
-    -- SCD2 quarantine: fdr_mdm_plcy_stats carries full history per policy.
-    -- We only ever want the CURRENT row. VERIFIED against prod 2026-08-17:
-    -- open rows use the sentinel END_DT_TMSP = '2999-12-31' (64,334,573 rows),
-    -- NOT NULL — an IS NULL predicate here would match zero rows and silently
-    -- NULL out all PolicyStats enrichment. Also note: sentinel-row count
-    -- exceeds policy count, so some policies carry MORE than one open row —
-    -- the QUALIFY backstop below is load-bearing, not decorative.
-    SELECT
-        PolicyStats.PLCY_NUM
-        , PolicyStats.PRIOR_PLCY
-        , PolicyStats.SRC_SYS
-        , PolicyStats.SRC_TRANS_TMSP
-    FROM {{ source('fdr', 'fdr_mdm_plcy_stats') }} AS PolicyStats
-    WHERE PolicyStats.END_DT_TMSP = '2999-12-31'::TIMESTAMP_NTZ
-    {% if is_incremental() %}
-    AND PolicyStats.PLCY_NUM IN (
-        SELECT DISTINCT PolicyStatsNew.PLCY_NUM
-        FROM {{ source('fdr', 'fdr_mdm_plcy_stats') }} AS PolicyStatsNew
-        WHERE PolicyStatsNew.SRC_TRANS_TMSP > (
-            SELECT COALESCE(MAX(PolicyRawPrev.Policy:SystemIds:LastPolicyStatsTmsp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
-            FROM {{ this }} AS PolicyRawPrev
-        )
-    )
-    {% endif %}
-    QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY PolicyStats.PLCY_NUM
-        ORDER BY PolicyStats.SRC_TRANS_TMSP DESC, PolicyStats.STRT_DT_TMSP DESC
     ) = 1
 )
 
@@ -71,21 +33,6 @@ WITH LatestTransaction AS (
             )
         ) WITHIN GROUP (ORDER BY PolicySnapshot.SNAP_YR_MO_CD) AS MonthlySnapshots
     FROM {{ source('rten', 'tfrdb_fws_pol_snap_mthly_rpt') }} AS PolicySnapshot
-    {% if is_incremental() %}
-    WHERE PolicySnapshot.EXT_POL_SFX_CONCAT_CD IN (
-        -- Policies with a monthly snapshot in the last 3 months (self-healing
-        -- lookback, anchored to data not wall clock — see Issue #5), UNION
-        -- policies whose xlob/PolicyStats watermarks already flagged them as
-        -- changed this run (reuses the same driving signal as Issues #3/#4
-        -- so this CTE stays in sync with why the rest of the row is being
-        -- rebuilt in the first place).
-        SELECT DISTINCT PolicySnapshotRecent.EXT_POL_SFX_CONCAT_CD
-        FROM {{ source('rten', 'tfrdb_fws_pol_snap_mthly_rpt') }} AS PolicySnapshotRecent
-        WHERE PolicySnapshotRecent.SNAP_YR_MO_CD >= TO_CHAR(
-            DATEADD('month', -3, CURRENT_DATE), 'YYYY-MM'
-        )
-    )
-    {% endif %}
     GROUP BY PolicySnapshot.EXT_POL_SFX_CONCAT_CD
 )
 
@@ -109,9 +56,7 @@ SELECT
         'ZipCode', LatestTransaction.ZipCode,
         'SystemIds', OBJECT_CONSTRUCT_KEEP_NULL(
             'RtenPlcyCntrctNum', CAST(Policy.PLCY_CNTRCT_NUM AS VARCHAR),
-            'FdrPlcyNum', CAST(PolicyStats.PLCY_NUM AS VARCHAR),
-            'LastTransactionTmsp', CAST(LatestTransaction.LatestTransactionTimestamp AS VARCHAR),
-            'LastPolicyStatsTmsp', CAST(PolicyStats.SRC_TRANS_TMSP AS VARCHAR)
+            'FdrPlcyNum', CAST(PolicyStats.PLCY_NUM AS VARCHAR)
         ),
         'MonthlySnapshots', COALESCE(
             PolicyMonthlyHistory.MonthlySnapshots,
@@ -129,12 +74,12 @@ SELECT
         PriorPolicyIndicator  VARCHAR,
         SourceSystemCode      VARCHAR,
         ZipCode               VARCHAR,
-        SystemIds             OBJECT(RtenPlcyCntrctNum VARCHAR, FdrPlcyNum VARCHAR, LastTransactionTmsp VARCHAR, LastPolicyStatsTmsp VARCHAR),
+        SystemIds             OBJECT(RtenPlcyCntrctNum VARCHAR, FdrPlcyNum VARCHAR),
         MonthlySnapshots      ARRAY(OBJECT(LoadYearMonthNum NUMBER, LineOfBusiness VARCHAR, InceptionDate DATE, CancellationDate DATE, PriorPolicy VARCHAR))
       ) AS Policy
 
 FROM {{ source('rten', 'rten_xcmpy_pif_tbl') }} AS Policy
-LEFT JOIN CurrentPolicyStats AS PolicyStats
+LEFT JOIN {{ source('fdr', 'fdr_mdm_plcy_stats') }} AS PolicyStats
     ON Policy.PLCY_CNTRCT_NUM = PolicyStats.PLCY_NUM
 LEFT JOIN LatestTransaction
     ON Policy.PLCY_CNTRCT_NUM = LatestTransaction.PLCY_CNTRCT_NUM
