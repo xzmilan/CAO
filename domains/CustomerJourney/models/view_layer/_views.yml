@@ -1,0 +1,106 @@
+version: 2
+
+models:
+  - name: ChangedAddress
+    description: |
+      ## Purpose
+      CONTRACT ITEM 4d / Move Journey (Edgar Lattuada).
+      Policies with at least one ZIP change, with move count and 90-day
+      post-move retention (count + rate).
+      ## Business Rules
+      Pure SELECT from PolicyWide — all measures pre-computed policy-grain.
+      No aggregation, no derivation in the view layer.
+      PolicyNumber is the natural key (RtenPlcyCntrctNum) — hashed ID is
+      internal-only and never consumer-facing.
+      ## JO Sheet Coverage
+      Policy Count (moved), 90-day Retention (count + rate).
+      Retention is measured FROM THE MOVE DATE + 90 days (JO sheet rule),
+      which is exactly what InForce90DaysAfterChangeFlag computes.
+      ZIP-5 change is the sanctioned PROXY for moving until the SRM/APEX/CSS
+      'Move' indicator lands; rNPS may be dropped at that point.
+      NOT covered (source not yet in project): Contacts per 100 PIF (F06 —
+      customers contacting SO within 30 days of move), rNPS/CES (F05).
+    meta:
+      business_steward: "Edgar Lattuada"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      contract_item: "4d"
+      grain: "policy"
+      journey: "Move Journey (Farmers EA)"
+      jo_source: "docs/JODataNeeds/MoveJourney.csv"
+
+  - name: ChangedProducer
+    description: |
+      ## Purpose
+      CONTRACT ITEM 4e / Agency Change Journey (Jessica Campbell).
+      Policies with at least one agent-of-record change, with change count
+      and 90-day post-change retention (count + rate).
+      ## Business Rules
+      Pure SELECT from PolicyWide — all measures pre-computed policy-grain.
+      PolicyNumber is the natural key (RtenPlcyCntrctNum) — hashed ID is
+      internal-only and never consumer-facing.
+      ## JO Sheet Coverage
+      Policy Count (agent change), 90-day Retention (count + rate).
+      JO focus is COMPANY-INITIATED changes (agent retires or sells book of
+      business) — the churn driver is the 30–45 day gap before the new agent
+      gets book access. Customer-initiated retention data exists in Snowflake
+      per the JO sheet but is not yet a project source.
+      NOT covered: Contacts per 100 PIF (F06 — customers contacting SO within
+      X days of change), Agent Change CSAT (Qualtrics), comms/policy-review
+      survey measures (F05), reassignment cycle time.
+      TODO(journey): company- vs customer-initiated split needs a
+      book-of-business transfer discriminator — not in rten_dim_pl_trn_xlob.
+    meta:
+      business_steward: "Jessica Campbell"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      contract_item: "4e"
+      grain: "policy"
+      journey: "Agency Change"
+      jo_source: "docs/JODataNeeds/AgencyChange.csv"
+
+  - name: FarmersOnboarding
+    description: |
+      ## Purpose
+      New Business cohort scorecard, FARMERS business entity,
+      by inception month (F04 pattern).
+      ## Business Rules
+      Aggregate scorecard view (month grain): COUNT of NB policies
+      (TermType = 'NB', BusinessEntity = 'FARMERS') per inception month.
+      NB/RB per FDR PRIOR_PLCY (authoritative).
+      JO sheet (Kim Baker): 90-day retention measured from NB policy
+      inception date. Companion measures not yet in project: Contacts per
+      100 PIF (customer + agent, on eSignature Dashboard, GWPC only),
+      Onboarding tNPS→CSAT (CSAT from March 2026), eSign adoption/self-serve,
+      avg days to complete signature, CES (first-90-day login cross-ref).
+    meta:
+      business_steward: "Kim Baker"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "inception_month"
+      scorecard: "F04"
+      journey: "Farmers Onboarding (EA & Direct)"
+      jo_source: "docs/JODataNeeds/FarmersOnboarding.csv"
+
+  - name: FwsOnboarding
+    description: |
+      ## Purpose
+      New Business cohort scorecard, FWS business entity,
+      by inception month (F04 pattern).
+      ## Business Rules
+      Aggregate scorecard view (month grain): COUNT of NB policies
+      (TermType = 'NB', BusinessEntity = 'FWS') per inception month.
+      JO sheet (Deanne Martin): 90-day retention measured from NB policy
+      inception date. Companion measures not yet in project: Contacts per
+      100 PIF (customer + agent), Onboarding tNPS (caveat: FWS survey volumes
+      segment for group but no group-only tNPS), contingency completion
+      rates, payment auth form completion, inspection completion,
+      F.com account setup.
+    meta:
+      business_steward: "Deanne Martin"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "inception_month"
+      scorecard: "F04"
+      journey: "FWS Onboarding"
+      jo_source: "docs/JODataNeeds/FWSOnboarding.csv"

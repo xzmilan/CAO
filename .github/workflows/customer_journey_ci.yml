@@ -1,0 +1,213 @@
+name: CustomerJourney dbt CI
+
+# CAO (Consumer Analytics Orchestration) This is a domain monorepo, meaning
+# multiple unrelated dbt projects live under CAO and all the tools we use
+# to test, format, etc can be applied to all domains. We can exclude rules 
+# if needed on specific domains, however some rules should apply to all. 
+#
+# 4 gates that have to pass before a PR will merge. None of them
+# touch Snowflake — the jinja templater catches any DAG issues, dbt parse
+# catches broken ref() and source() references (it validates that every model
+# you reference actually exists in the DAG — so you find out at PR time, not
+# deploy time), lint_all.py catches style + doctrine violations, and
+# check_column_contracts.py catches column-level breaks (renamed/deleted
+# fields silently breaking downstream Alias.Object:Field references).
+#
+# Wide-layer regeneration is DEPLOY-TIME ONLY (customer_journey_deploy.yml).
+# The committed wide_layer/*.sql files are non-authoritative documentation —
+# deploy always regenerates them fresh from merged main. This removes the
+# two-PR race condition on auto-generated files entirely.
+#
+# The deploy/build to Snowflake lives in a SEPARATE workflow
+# (customer_journey_deploy.yml, push-to-main only). Keeping it separate means
+# this PR gate never depends on secrets that may not be provisioned yet —
+# your PR checks run regardless of whether IT has set up the service account.
+#
+# Path-filtered to the CustomerJourney domain only. When a new domain is added
+# under domains/, duplicate this file and update the `paths:` blocks plus the
+# `working-directory` / --domain value. Same pattern MESAProductDev uses.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "domains/CustomerJourney/**"
+      - ".sqlfluff"
+      - "tools/**"
+      - ".github/workflows/customer_journey_ci.yml"
+
+# The auto-fix job (Job 0) pushes a commit back onto the PR branch. The
+# default GITHUB_TOKEN on a pull_request event is read-only unless the
+# workflow explicitly asks for write access, so this must be declared here.
+# Scoped to THIS workflow file only — no repo-level permission change.
+permissions:
+  contents: write
+
+# All jobs run inside the domain folder — the domain is a self-contained dbt
+# project (its own dbt_project.yml, profiles.yml, tools/).
+defaults:
+  run:
+    working-directory: domains/CustomerJourney
+
+jobs:
+  # ── Job 0: Auto-Fix ─────────────────────────────────────────────────────
+  # Runs tools/fix_all.py — sqlfluff fix mode (CP01/CP03/AL01/02/04/05,
+  # LT01/02/05/06; CP02 excluded by design, see .sqlfluff) — across every
+  # model file in the domain BEFORE lint ever runs. It only applies the safe
+  # cosmetic fixes; it never rewrites identifier case (that is enforced
+  # lint-only by check_identifier_doctrine, never auto-changed).
+  #
+  # If fix_all.py changes anything, this job commits + pushes the fix straight
+  # onto the PR branch, then exits 1 ON PURPOSE. That push starts a fresh
+  # workflow run against the now-clean code, and THAT run is the one whose
+  # gates (auto-assembly → lint → compile) have to go green. The exit-1 here
+  # is expected, not a failure — the check goes green on the auto-triggered
+  # re-run a few seconds later.
+  #
+  # If fix_all.py makes no changes, this job just passes and the rest of the
+  # gates run in this same run, exactly like before this job existed.
+  #
+  # Guarded to same-repo PRs only: a fork PR's GITHUB_TOKEN cannot push to
+  # the fork, so the job would always fail. xzmilan/CAO has no external
+  # contributors today, but the guard keeps it correct if that changes.
+  #
+  # CRITICAL: the commit-push steps below MUST use github-actions[bot] as
+  # the git identity. Commits pushed under an unresolvable name (the old
+  # cao-auto-fix[bot]) make GitHub gate the follow-up run for maintainer
+  # approval — the branch head looks like it came from an unverified
+  # contributor. github-actions[bot] resolves to a first-class actor and
+  # runs start immediately. Don't change this identity.
+  auto-fix:
+    name: Auto-Fix (sqlfluff fix)
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    # git + fix_all.py run from the repo root, not the domain folder — this
+    # overrides the workflow-level `defaults` working-directory.
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Check out the PR head branch by name (not the detached merge ref)
+          # and fetch full history, so the push below is a clean fast-forward.
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install linting dependencies
+        run: pip install "sqlfluff>=2.0.0,<4.0.0"
+      - name: Run auto-fix across CustomerJourney models
+        run: python3 tools/fix_all.py --domain CustomerJourney
+      - name: Detect changed files
+        id: diff
+        run: |
+          if git diff --quiet -- domains/CustomerJourney/models; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Commit and push auto-fixed files
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          # github-actions[bot] is GitHub's built-in actor — commits pushed
+          # under this identity resolve to a verified account, so the
+          # follow-up workflow run isn't gated for maintainer approval the
+          # way a made-up bot name (the old cao-auto-fix[bot]) was.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add domains/CustomerJourney/models
+          git commit -m "style: auto-fix SQL formatting (tools/fix_all.py)"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+      - name: Fail this run (a re-run on fixed code will be the real gate)
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          echo "::error::Auto-fix pushed a formatting commit to this branch. A new run is evaluating the fixed code — check that run, not this one."
+          exit 1
+
+  # ── Job 1: CAO Lint Gate ───────────────────────────────────────────────
+  # Runs lint_all.py, NOT raw `sqlfluff lint`. The Python wrapper does two
+  # things raw sqlfluff can't:
+  #
+  #   (a) handles Snowflake-only syntax — colon field access
+  #       (Policy.Policy:Field) and multi-field ::OBJECT(Field TYPE, ...)
+  #       casts — by protecting those constructs before sqlfluff parses.
+  #       Raw sqlfluff throws PRS on both of these;
+  #
+  #   (b) enforces the CAO identifier doctrine — ID all-caps, raw source
+  #       columns UPPER_SNAKE, metric aliases PascalCase. sqlfluff's CP02
+  #       'consistent' policy can't express this (it forces one case per
+  #       file and would semantically rename identifiers — it'd turn ID→Id
+  #       or TenureDays→TENUREDAYS — so CP02 is disabled).
+  #
+  # No database connection needed — jinja templater, not dbt. The default
+  # working-directory is the domain folder; lint_all.py lives at the repo
+  # root, so invoke it by relative path from the domain.
+  lint:
+    name: CAO Lint Gate
+    runs-on: ubuntu-latest
+    needs: auto-fix
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install linting dependencies
+        run: pip install "sqlfluff>=2.0.0,<4.0.0"
+      - name: CAO lint gate (colons/OBJECT-safe + identifier doctrine)
+        run: python3 ../../tools/lint_all.py --domain CustomerJourney
+
+  # ── Job 2: Column-Contract Gate ────────────────────────────────────────
+  # Catches the failure dbt parse can't: a renamed/deleted field in an
+  # upstream model silently breaking every downstream Alias.Object:Field
+  # reference — previously only discovered at deploy time in Snowflake.
+  # Diff-scoped (only contracts of models changed in THIS PR are
+  # re-validated against their consumers), read-only, no secrets, no
+  # warehouse. Also hard-fails SELECT * over ref() — CAO doctrine, now
+  # machine-enforced.
+  #
+  # Needs fetch-depth: 0 so the diff against origin/main works.
+  column-contracts:
+    name: Column-Contract Gate
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Column-contract gate (diff-scoped, read-only)
+        run: python3 ../../tools/check_column_contracts.py --domain CustomerJourney
+
+  # ── Job 3: dbt Compile ─────────────────────────────────────────────────
+  # Validates Jinja + the DAG WITHOUT touching Snowflake. dbt parse catches
+  # broken ref() and source() calls — it checks that every model you
+  # reference actually exists in the project, that there are no circular
+  # dependencies, and that no model is missing from the graph — so you
+  # don't find out about broken references at deploy time. Needs a
+  # profiles.yml but not a live warehouse connection.
+  compile:
+    name: dbt Compile
+    runs-on: ubuntu-latest
+    needs: column-contracts
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dbt
+        run: pip install "dbt-core<2.0" "dbt-snowflake<2.0"
+      - name: dbt parse (validates Jinja + DAG references)
+        env:
+          DBT_PROFILES_DIR: .
+        run: dbt parse --profiles-dir .
+
+  # NOTE: the deploy + build job intentionally lives in a SEPARATE file
+  # (customer_journey_deploy.yml, push-to-main only). It needs Snowflake
+  # service account secrets, so keeping it apart means this PR gate runs
+  # with no secrets provisioned at all — you can enable the deploy workflow
+  # later when IT provides the service account, without touching these
+  # PR checks.

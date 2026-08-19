@@ -1,0 +1,94 @@
+name: CustomerJourney dbt Deploy
+
+# CAO (Consumer Analytics Orchestration) — Snowflake deploy/build workflow.
+#
+# This is the ONLY workflow that touches Snowflake. Cadence is SCHEDULED
+# (nightly), not per-merge — merges to main just update the branch; the
+# 7am ET run picks up everything accumulated since the prior run in one
+# batched deploy. This is deliberate: with incremental raw models
+# (PolicyRaw/ChangeEventRaw/SurveyRaw), triggering a full deploy pipeline on
+# every merge means paying Snowflake warehouse spin-up/MERGE overhead
+# per-merge instead of once per day for the same eventual freshness. A
+# manual `workflow_dispatch` trigger stays available for on-demand runs
+# (e.g. testing a change immediately rather than waiting for the schedule).
+#
+# It's separate from the PR-gating workflow (customer_journey_ci.yml) so PR
+# checks never depend on Snowflake secrets that may not be provisioned yet —
+# your PR can pass all the rules without IT having set anything up.
+#
+# It needs a Snowflake SERVICE ACCOUNT (not a personal account), supplied
+# via GitHub Secrets/Variables. See the CAO README for setup steps.
+#
+# Temporary individual-login deploy — using Steven Passanante's contractor
+# account until the service account is granted the correct role access.
+# When Farmers IT provisions the service account + opens the IP allowlist,
+# swap the hardcoded values in the env: block to:
+#   ${{ vars.SNOWFLAKE_ACCOUNT }}, ${{ vars.SNOWFLAKE_USER }}, etc.
+# NOTE: If Farmers enforces SSO/MFA for this account, --temporary-connection
+# with password auth will fail in CI. In that case, switch to key-pair auth
+# (--private-key-path) or request a service account with password auth.
+#
+# CRON NOTE: GitHub Actions schedule cron is ALWAYS UTC, never local time.
+# 7:00 AM ET = 12:00 UTC during EST (standard time, ~early Nov–early Mar)
+# but 11:00 UTC during EDT (daylight time, ~mid-Mar–early Nov). GitHub
+# Actions does not auto-adjust for DST. Cron below is pinned to 12:00 UTC
+# (true 7am during EST). During EDT months the actual run lands ~8am ET,
+# one hour later than intended, until this is manually flipped to 11:00 UTC
+# for daylight months (or replaced with a DST-aware external scheduler).
+# Flag this on the calendar or it will drift silently every March/November.
+
+on:
+  schedule:
+    - cron: "0 12 * * *"   # 7:00 AM ET (EST, UTC-5) — see CRON NOTE above
+  workflow_dispatch: {}   # allow manual trigger from the Actions tab
+
+defaults:
+  run:
+    working-directory: domains/CustomerJourney
+
+jobs:
+  deploy:
+    name: Deploy + Build to Snowflake (Farmers)
+    runs-on: ubuntu-latest
+    env:
+      SNOWFLAKE_ACCOUNT: FARMERS-AWSUSEAST2
+      SNOWFLAKE_USER: STEVEN.PASSANANTE@CONTRACTOR.FARMERSINSURANCE.COM
+      SNOWFLAKE_ROLE: FARMERS OKTA SFLAKE_ WKSP_PL_MARKETING_RW
+      SNOWFLAKE_WAREHOUSE: PRD_IT_EBI_WH
+      SNOWFLAKE_DATABASE: PRD_BIZDB_PL_MARKETING
+      SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Write Snowflake private key
+        run: |
+          echo "$SNOWFLAKE_PRIVATE_KEY" > /tmp/snowflake_key.p8
+          chmod 600 /tmp/snowflake_key.p8
+      - name: Regenerate wide layer from metric files
+        run: python3 tools/generate_wide_layer.py
+      - name: Install Snowflake CLI
+        run: pip install snowflake-cli-labs
+      - name: Create CUSTOMERJOURNEY schema if needed
+        run: |
+          snow sql --temporary-connection \
+            --private-key-path /tmp/snowflake_key.p8 \
+            -q "CREATE SCHEMA IF NOT EXISTS PRD_BIZDB_PL_MARKETING.CUSTOMERJOURNEY"
+      - name: Deploy DBT PROJECT
+        run: |
+          snow dbt deploy customer_journey \
+            --temporary-connection \
+            --private-key-path /tmp/snowflake_key.p8 \
+            --source . \
+            --database PRD_BIZDB_PL_MARKETING \
+            --schema CUSTOMERJOURNEY \
+            --dbt-version 1.11.11
+      - name: Execute build
+        run: |
+          snow dbt execute customer_journey \
+            --temporary-connection \
+            --private-key-path /tmp/snowflake_key.p8 \
+            --database PRD_BIZDB_PL_MARKETING \
+            --schema CUSTOMERJOURNEY \
+            build --target dev

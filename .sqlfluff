@@ -1,0 +1,136 @@
+# See https://docs.sqlfluff.com/en/stable/configuration.html
+# SQLFluff config for the Farmers CustomerJourney dbt projects (CustomerJourney/
+# and CustomerJourney_Farmers/). Adapted from the MESA model_zoo_sf/.sqlfluff
+# rule set already in production use across MESAProductDev — same rules,
+# same capitalisation policy, so SQL style is consistent across both
+# codebases Steve maintains.
+
+[sqlfluff]
+# templater = jinja, NOT dbt — deliberate, matches the same trick already
+# used in mesa-governance-api/.sqlfluff and MESAProductDev/.github/workflows/ci.yml
+# (that workflow overrides to `--templater jinja` on the CLI for the same
+# reason). The dbt templater requires a LIVE Snowflake connection to resolve
+# ref()/source() macros (verified 2026-08-06 — it fails with "Password is
+# empty" / connection errors with no warehouse creds available), which we
+# never want for local linting or a CI job that has no Snowflake secrets.
+# Jinja templater still expands {{ ref(...) }}/{{ config(...) }}/{{ var(...) }}
+# via apply_dbt_builtins (see [sqlfluff:templater:jinja] below) — good enough
+# for style/capitalisation/aliasing linting, which is all these rules check.
+templater = jinja
+dialect = snowflake
+sql_file_exts = .sql
+max_line_length = 200
+
+# Keep the same rule subset as model_zoo_sf/.sqlfluff and
+# mesa-governance-api/.sqlfluff: capitalisation + explicit aliasing +
+# layout only. Do NOT enable structure.* or convention.* rules — this
+# project's OBJECT-only doctrine (DEPLOY_HANDOFF.md \u00a710) and heavy use of
+# OBJECT_CONSTRUCT_KEEP_NULL(...)::OBJECT(...) casts trips up sqlfluff's
+# generic "simplify" rules with false positives.
+# LT04 (leading-comma layout) is DELIBERATELY EXCLUDED, unlike the
+# MESAProductDev reference configs — this project's SQL style uses LEADING
+# commas everywhere (", ColumnName" at the start of a line, visible in every
+# committed .sql file) as a matter of established convention, the opposite
+# of what LT04 enforces (trailing commas). Verified 2026-08-06: enabling
+# LT04 produced 94 findings across the codebase, 100% against the
+# intentional style, zero real issues. Do not re-enable without first
+# reformatting every existing file to trailing commas (not recommended —
+# high risk, no functional benefit, breaks git blame history for no gain).
+#
+# CP02 (capitalisation.identifiers) is EXCLUDED from the sqlfluff pass.
+# sqlfluff's 'consistent' policy can only enforce ONE case per file and would
+# semantically rename identifiers (ID->Id, or TenureDays->TENUREDAYS). The CAO
+# identifier doctrine — ID all-caps, raw source columns UPPER_SNAKE, metric
+# aliases PascalCase, simultaneously — is enforced by a dedicated Python check
+# (tools/sql_formatter_snowflake.py::check_identifier_doctrine) instead, which
+# CAN express per-identifier rules. This mirrors mesa-governance-api's
+# sql_formatter.py, which excludes the same rule for the same reason.
+rules = CP01, CP03, AL01, AL02, AL04, AL05, LT01, LT02, LT05, LT06
+
+# LT05 (line length) is enforced for HAND-WRITTEN layers but EXCLUDED for the
+# auto-generated wide_layer/: those files are machine-built by
+# tools/generate_wide_layer.py ("DO NOT EDIT BY HAND"), and their
+# OBJECT_CONSTRUCT_KEEP_NULL('Name', Name.Name)::OBJECT(...) AS Name lines
+# legitimately exceed 200 chars because the metric name repeats 3x. Enforcing
+# a cosmetic line-length cap on files no human maintains is pure noise — the
+# generator owns them. Hand-written metric/raw/view layers keep LT05 at 200.
+[sqlfluff:rules:layout.long_lines]
+ignore_comment_lines = true
+ignore_comment_clauses = true
+
+# Per-path override: the auto-generated wide_layer/ files are exempt from LT05
+# because they are machine-built by tools/generate_wide_layer.py and their long
+# OBJECT_CONSTRUCT_KEEP_NULL('Name', Name.Name)::OBJECT(...) AS Name lines are
+# intentional (metric name repeats 3x). No human maintains these files by hand.
+[sqlfluff:path:models/wide_layer]
+exclude_rules = LT05
+
+# AL05 (aliasing.unused) has a known false-positive on Snowflake
+# LATERAL FLATTEN output aliases. sqlfluff's Snowflake dialect does not
+# recognize a FLATTEN alias as "used" when its fields are accessed via
+# colon notation (alias.value:Field) inside a SELECT/GROUP BY. Verified
+# 2026-08-12 on models/metric_layer/Policy_Metrics/AgentChange*.sql and
+# related survey metrics — the alias IS referenced, but sqlfluff flags it
+# unused, and its only autofix deletes the alias and then breaks every
+# downstream reference to it. This is a dialect gap, not a code issue.
+#
+# AL05 cannot be cleanly path-scoped the way LT05 is, because LATERAL
+# FLATTEN appears across raw_layer AND metric_layer (not one folder), so
+# the exemption is implemented as a scoped check in the Python gate —
+# tools/sql_formatter_snowflake.py::lint_snowflake_sql — which only skips
+# AL05 when the flagged alias is declared immediately after a
+# LATERAL FLATTEN(...). A genuinely unused, non-FLATTEN alias still fails.
+# Do NOT add AL05 to a [sqlfluff:path:...] exclude_rules block to work
+# around this — that would also silence real unused-alias findings.
+
+# SNOWFLAKE-SYNTAX HANDLING (colons + OBJECT casts):
+# sqlfluff's Snowflake grammar cannot parse two constructs this project uses
+# heavily:  (a) OBJECT field access via colon  Policy.Policy:InceptionDate, and
+# (b) the multi-field / nested cast  ...::OBJECT(Field TYPE, OBJECT(...) ...).
+# These are NOT handled by this config file -- they are handled by the CI gate,
+# tools/sql_formatter_snowflake.py, which PROTECTS these constructs (placeholder
+# swap, balanced-paren extraction) before invoking sqlfluff and restores them
+# after. If you run raw `sqlfluff lint` by hand you WILL see PRS "unparsable
+# section" findings on those lines -- that is the known sqlfluff dialect gap,
+# not a code issue. The authoritative gate is the Python formatter, not raw
+# sqlfluff. Do NOT rewrite OBJECT casts to satisfy the linter.
+
+[sqlfluff:rules:capitalisation.keywords]
+# SELECT, FROM, WHERE, JOIN, CASE, WHEN, etc. must be uppercase.
+capitalisation_policy = upper
+
+[sqlfluff:rules:capitalisation.functions]
+# Functions AND Snowflake-specific ones (OBJECT_CONSTRUCT_KEEP_NULL,
+# DATEDIFF, BASE64_ENCODE, SHA2, etc.) must be uppercase.
+capitalisation_policy = upper
+
+# NOTE: there is deliberately NO [sqlfluff:rules:capitalisation.identifiers]
+# section here. CP02 (capitalisation.identifiers) is NOT in the `rules =` list
+# above, so it never runs. Identifier case is a CAO DOCTRINE enforced by the
+# Python gate (tools/sql_formatter_snowflake.py::check_identifier_doctrine):
+#   - ID                       -> ALL-CAPS (entity primary key)
+#   - raw source columns       -> UPPER_SNAKE as-is (PLCY_CNTRCT_NUM, EFF_DT)
+#   - metric / alias names     -> PascalCase (TenureDays, InceptionMonth)
+# sqlfluff's CP02 'consistent' policy cannot express that per-identifier mix --
+# it forces ONE case per file and would semantically rename identifiers -- so it
+# stays off. This mirrors mesa-governance-api's sql_formatter.py, which excludes
+# the same rule for the same reason.
+
+[sqlfluff:rules:aliasing.column]
+# AL01: column aliases must use AS keyword.
+aliasing = explicit
+
+[sqlfluff:rules:aliasing.table]
+# AL02: table aliases must use AS keyword (e.g. "FROM {{ ref('PolicyRaw') }} AS Policy").
+aliasing = explicit
+
+[sqlfluff:rules:aliasing.forbid]
+# AL04: no duplicate aliases in a query.
+force_enable = true
+
+[sqlfluff:rules:layout.indent]
+indent_unit = space
+tab_space_size = 4
+
+[sqlfluff:templater:jinja]
+apply_dbt_builtins = true

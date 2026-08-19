@@ -1,0 +1,55 @@
+name: customer_journey
+version: '1.0.0'
+config-version: 2
+profile: customer_journey
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+
+vars:
+  dev_row_limit: 10
+
+seeds:
+  customer_journey:
+    seed_policy:
+      +schema: RAW_POLICY
+    seed_policy_change_event:
+      +schema: RAW_CHANGE_EVENT
+
+models:
+  customer_journey:
+    raw_layer:
+      +materialized: table
+      Policy:
+        +materialized: incremental
+        +incremental_strategy: merge
+        +unique_key: ID
+        +schema: RAW_POLICY
+      ChangeEvent:
+        +materialized: incremental
+        +incremental_strategy: merge
+        +unique_key: ID
+        +schema: RAW_CHANGE_EVENT
+      Survey:
+        +materialized: incremental
+        +incremental_strategy: merge
+        +unique_key: ID
+        +schema: RAW_SURVEY
+      Contact:
+        +schema: RAW_CONTACT
+    metric_layer:
+      +materialized: table
+      Policy_Metrics:
+        +schema: METRICS_POLICY
+      ChangeEvent_Metrics:
+        +schema: METRICS_CHANGE_EVENT
+      Survey_Metrics:
+        +schema: METRICS_SURVEY
+      Contact_Metrics:
+        +schema: METRICS_CONTACT
+    wide_layer:
+      +materialized: table
+      +schema: WIDE
+    view_layer:
+      +materialized: view
+      +schema: VIEWS
