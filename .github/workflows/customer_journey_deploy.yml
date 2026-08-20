@@ -1,6 +1,7 @@
 name: CustomerJourney dbt Deploy
 
-# CAO (Consumer Analytics Orchestration) — Snowflake deploy/build workflow.# This is the ONLY workflow that touches Snowflake. Cadence is SCHEDULED
+# CAO (Consumer Analytics Orchestration) — Snowflake deploy/build workflow.
+# This is the ONLY workflow that touches Snowflake. Cadence is SCHEDULED
 # (nightly), not per-merge — merges to main just update the branch; the
 # 7am ET run picks up everything accumulated since the prior run in one
 # batched deploy. This is deliberate: with incremental raw models
@@ -16,9 +17,6 @@ name: CustomerJourney dbt Deploy
 #
 # It needs a Snowflake SERVICE ACCOUNT (not a personal account), supplied
 # via GitHub Secrets/Variables. See the CAO README for setup steps.
-#
-# TriFor vice account + op the env: block back to ${{ vars.SNOWFLAKE_* }} / ${{ secrets.SNOWFLAKE_PASSWORD }}
-# and point at the Farmers account/role/warehouse/database.
 #
 # CRON NOTE: GitHub Actions schedule cron is ALWAYS UTC, never local time.
 # 7:00 AM ET = 12:00 UTC during EST (standard time, ~early Nov–early Mar)
