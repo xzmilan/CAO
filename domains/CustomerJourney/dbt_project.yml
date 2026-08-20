@@ -18,10 +18,19 @@ models:
     raw_layer:
       +materialized: table
       Policy:
+        +materialized: incremental
+        +incremental_strategy: merge
+        +unique_key: ID
         +schema: RAW_POLICY
       ChangeEvent:
+        +materialized: incremental
+        +incremental_strategy: merge
+        +unique_key: ID
         +schema: RAW_CHANGE_EVENT
       Survey:
+        +materialized: incremental
+        +incremental_strategy: merge
+        +unique_key: ID
         +schema: RAW_SURVEY
       Contact:
         +schema: RAW_CONTACT

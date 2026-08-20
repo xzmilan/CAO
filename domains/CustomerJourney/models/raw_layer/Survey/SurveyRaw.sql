@@ -74,6 +74,12 @@ WITH AgentChangeResponses AS (
     FROM {{ source('tnps', 'agtchg_invites_sent') }} AS AgentChangeInvite
     LEFT JOIN AgentChangeResponses
         ON AgentChangeInvite.POLICY_NUMBER = AgentChangeResponses.PolicyNumber
+    {% if is_incremental() %}
+    WHERE DATE_TRUNC('month', AgentChangeInvite.INVITE_PULL_DATE) >= DATEADD(
+        'month', -3,
+        (SELECT COALESCE(MAX(SurveyRawPrev.Survey:InviteWave::DATE), CURRENT_DATE) FROM {{ this }} AS SurveyRawPrev)
+    )
+    {% endif %}
     GROUP BY
         'AGENT_CHANGE'
         , DATE_TRUNC('month', AgentChangeInvite.INVITE_PULL_DATE)
