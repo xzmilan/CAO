@@ -9,20 +9,31 @@
 --           NEVER reads the STG_APEX view (1.76B-row dedup trap) — reads
 --           PRD_BRNZ_APEX.CONTACT directly.
 
+{{ config(
+    pre_hook="ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = 14400"
+) }}
+
 WITH ApexContacts AS (
+    -- GRAX archive table: 1.88B rows = ~10 versions per contact.
+    -- Dedup to latest non-deleted version per contact ID (182M contacts).
     SELECT
         ApexContact.ID AS ApexContactId
         , ApexContact.ACCOUNTID AS ApexAccountId
         , ApexContact.EMAIL AS PreferredEmail
-        , ApexContact.PREFERRED_PHONE_NUMBER_C AS PreferredPhone
-        , ApexContact.PREFERRED_PHONE_TYPE_C AS PreferredPhoneType
-        , ApexContact.CONTACT_NAME AS ContactName
+        , ApexContact.PREFERRED_PHONE_NUMBER__C AS PreferredPhone
+        , ApexContact.PREFERRED_PHONE_TYPE__C AS PreferredPhoneType
+        , ApexContact.NAME AS ContactName
         , ApexContact.MAILINGSTREET AS MailingStreet
         , ApexContact.MAILINGCITY AS MailingCity
         , ApexContact.MAILINGSTATECODE AS MailingState
         , ApexContact.MAILINGPOSTALCODE AS MailingZip
         , ApexContact.LASTMODIFIEDDATE AS LastModifiedDate
     FROM {{ source('brnz_apex', 'contact') }} AS ApexContact
+    WHERE ApexContact.ISDELETED = FALSE
+    QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY ApexContact.ID
+        ORDER BY ApexContact.GRAX__IDSEQ DESC
+    ) = 1
 )
 
 , ContactSpaceEvents AS (
@@ -88,20 +99,20 @@ WITH ApexContacts AS (
         ApexContacts.ApexContactId
         , ARRAY_AGG(
             OBJECT_CONSTRUCT_KEEP_NULL(
-                'ContactEventId', AllContactEvents.ContactEventId,
-                'ContactChannel', AllContactEvents.ContactChannel,
-                'ContactTimestamp', AllContactEvents.ContactTimestamp,
-                'ContactAttempts', AllContactEvents.ContactAttempts,
-                'TotalCallDurationSeconds', AllContactEvents.TotalCallDurationSeconds,
-                'IsQualifiedContact', AllContactEvents.IsQualifiedContact,
-                'IsQuoteDiscussed', AllContactEvents.IsQuoteDiscussed,
-                'ContactSources', OBJECT_CONSTRUCT_KEEP_NULL(
-                    'ContactSpace', AllContactEvents.SourceContactSpace,
-                    'Livevox', AllContactEvents.SourceLivevox,
-                    'Drips', AllContactEvents.SourceDrips,
-                    'Sfmc', AllContactEvents.SourceSfmc,
-                    'EaJourney', AllContactEvents.SourceEaJourney,
-                    'DbuJourney', AllContactEvents.SourceDbuJourney
+                'ContactEventId', AllContactEvents.ContactEventId
+                , 'ContactChannel', AllContactEvents.ContactChannel
+                , 'ContactTimestamp', AllContactEvents.ContactTimestamp
+                , 'ContactAttempts', AllContactEvents.ContactAttempts
+                , 'TotalCallDurationSeconds', AllContactEvents.TotalCallDurationSeconds
+                , 'IsQualifiedContact', AllContactEvents.IsQualifiedContact
+                , 'IsQuoteDiscussed', AllContactEvents.IsQuoteDiscussed
+                , 'ContactSources', OBJECT_CONSTRUCT_KEEP_NULL(
+                    'ContactSpace', AllContactEvents.SourceContactSpace
+                    , 'Livevox', AllContactEvents.SourceLivevox
+                    , 'Drips', AllContactEvents.SourceDrips
+                    , 'Sfmc', AllContactEvents.SourceSfmc
+                    , 'EaJourney', AllContactEvents.SourceEaJourney
+                    , 'DbuJourney', AllContactEvents.SourceDbuJourney
                 )
             )
         ) WITHIN GROUP (ORDER BY AllContactEvents.ContactTimestamp) AS ContactEvents
@@ -118,23 +129,23 @@ SELECT
 
     , OBJECT_CONSTRUCT_KEEP_NULL(
         'Identity', OBJECT_CONSTRUCT_KEEP_NULL(
-            'ApexContactId', ApexContacts.ApexContactId,
-            'ApexAccountId', ApexContacts.ApexAccountId,
-            'ContactName', ApexContacts.ContactName,
-            'PreferredEmail', ApexContacts.PreferredEmail,
-            'PreferredPhone', ApexContacts.PreferredPhone,
-            'PreferredPhoneType', ApexContacts.PreferredPhoneType
-        ),
-        'MailingAddress', OBJECT_CONSTRUCT_KEEP_NULL(
-            'Street', ApexContacts.MailingStreet,
-            'City', ApexContacts.MailingCity,
-            'State', ApexContacts.MailingState,
-            'Zip', ApexContacts.MailingZip
-        ),
-        'ContactEvents', COALESCE(ContactEventsByContact.ContactEvents, ARRAY_CONSTRUCT()),
-        'SystemIds', OBJECT_CONSTRUCT_KEEP_NULL(
-            'ApexContactId', ApexContacts.ApexContactId,
-            'ApexAccountId', ApexContacts.ApexAccountId
+            'ApexContactId', ApexContacts.ApexContactId
+            , 'ApexAccountId', ApexContacts.ApexAccountId
+            , 'ContactName', ApexContacts.ContactName
+            , 'PreferredEmail', ApexContacts.PreferredEmail
+            , 'PreferredPhone', ApexContacts.PreferredPhone
+            , 'PreferredPhoneType', ApexContacts.PreferredPhoneType
+        )
+        , 'MailingAddress', OBJECT_CONSTRUCT_KEEP_NULL(
+            'Street', ApexContacts.MailingStreet
+            , 'City', ApexContacts.MailingCity
+            , 'State', ApexContacts.MailingState
+            , 'Zip', ApexContacts.MailingZip
+        )
+        , 'ContactEvents', COALESCE(ContactEventsByContact.ContactEvents, ARRAY_CONSTRUCT())
+        , 'SystemIds', OBJECT_CONSTRUCT_KEEP_NULL(
+            'ApexContactId', ApexContacts.ApexContactId
+            , 'ApexAccountId', ApexContacts.ApexAccountId
         )
     ) AS Contact
 FROM ApexContacts

@@ -5,7 +5,7 @@ models:
     description: |
       ## Purpose
       RAW ENTITY: Policy — full policy definition at one row per policy.
-      Sole reader of the RTEN transaction and FWS snapshot mirrors; nothing
+      Sole reader of the RTEN transaction and FWS snapshot tables; nothing
       downstream reads those tables.
 
       ## Business Rules
@@ -35,7 +35,7 @@ models:
       ## Purpose
       RAW ENTITY: ChangeEvent — one row per policy change event
       (ZIP_CHANGE or AGENT_CHANGE), detected via LAG over the RTEN
-      transaction mirror. THE CONTRACT for all change-event data.
+      transaction table. THE CONTRACT for all change-event data.
 
       ## Business Rules
       - ID = BASE64_ENCODE(SHA2(PLCY_CNTRCT_NUM|EventType|EFF_DT|SRC_TRANS_TMSP, 256)).
@@ -109,12 +109,33 @@ models:
       - Contact sources tracked in typed OBJECT (ContactSources).
       - Join from contact events to identity is TBD pending diagnosis
         (FFQ_QUOTE_ID → policy, or phone/email fallback).
+
+      ## Incremental status (as of 2026-08-27)
+      Deliberately materialized as `table` (full rebuild), NOT `incremental`,
+      unlike PolicyRaw/ChangeEventRaw/SurveyRaw. This is intentional, not an
+      oversight — see SPEC_CAO_INCREMENTAL_RAW_LAYER_HARDENING.md:
+      - The AllContactEvents join is still the `ON FALSE` scaffold, so
+        ContactEvents is always an empty array. There is no real "what
+        changed on the event side" signal to build a watermark on yet.
+      - ApexContacts.LASTMODIFIEDDATE is a legitimate watermark candidate
+        for the identity side, but incrementalizing identity alone would not
+        reduce the actual cost driver — the query still full-scans/dedupes
+        the 1.88B-row GRAX archive every run regardless, since the event
+        side has no wired-in change signal.
+      - Sequencing: (1) finish the FFQ_QUOTE_ID → policy/contact join
+        diagnosis so AllContactEvents actually populates, THEN (2) add a
+        two-signal watermark (LASTMODIFIEDDATE on identity + the resolved
+        event source's timestamp) mirroring the PolicyRaw pattern. Adding
+        incremental logic before the join lands would be optimizing a
+        model that doesn't do its real job yet.
     meta:
       business_steward: "TBD"
       technical_steward: "Steve Passanante"
       prc_classification: "Internal_Confidential"
       grain: "contact_identity"
       entity: "Contact"
+      build_status: "scaffold_pending_join_diagnosis"
+      incremental_status: "deferred_pending_join_diagnosis"
     columns:
       - name: ID
         description: Hashed surrogate key over natural key ApexContactId.

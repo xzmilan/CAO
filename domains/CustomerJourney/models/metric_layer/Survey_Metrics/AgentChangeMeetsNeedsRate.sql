@@ -7,10 +7,9 @@
 
 SELECT
     Survey.ID
-    , (
-        SELECT AVG(IFF(Response.value:AgentChangeDetails:MeetsNeedsFlag = 'Y', 1.0, 0.0))
-        FROM TABLE(FLATTEN(INPUT => Survey.Survey:Responses)) AS Response
-        WHERE Response.value:AgentChangeDetails:MeetsNeedsFlag IS NOT NULL
-    ) AS AgentChangeMeetsNeedsRate
+    , AVG(IFF(Response.value:AgentChangeDetails:MeetsNeedsFlag = 'Y', 1.0, 0.0)) AS AgentChangeMeetsNeedsRate
 FROM {{ ref('SurveyRaw') }} AS Survey
+CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Survey:Responses) AS Response
 WHERE Survey.Survey:SurveyType = 'AGENT_CHANGE'
+  AND Response.value:AgentChangeDetails:MeetsNeedsFlag IS NOT NULL
+GROUP BY Survey.ID

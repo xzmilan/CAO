@@ -6,16 +6,15 @@
 #
 # Format:  <path-pattern>  <owner1> <owner2> ...
 # Later, more-specific rules override earlier general ones.
-# Replace @xzmilan with the real GitHub username/team as the platform grows.
 
 # Default owner for everything.
-*  @xzmilan
+*  @STEVEN-PASSANANTE_farmers
 
 # Each domain is owned explicitly — add a line per new domain under domains/.
-/domains/CustomerJourney/  @xzmilan
+/domains/CustomerJourney/  @STEVEN-PASSANANTE_farmers
 
 # The CI pipeline — changes to what gates a merge are high-risk.
-/.github/workflows/  @xzmilan
+/.github/workflows/  @STEVEN-PASSANANTE_farmers
 
 # Shared lint rules — loosening a rule here weakens every domain's PR gate.
-/.sqlfluff  @xzmilan
+/.sqlfluff  @STEVEN-PASSANANTE_farmers

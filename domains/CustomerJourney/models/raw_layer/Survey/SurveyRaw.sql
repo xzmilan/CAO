@@ -38,56 +38,62 @@ WITH AgentChangeResponses AS (
 , AgentChangeCampaign AS (
     SELECT
         'AGENT_CHANGE' AS SurveyType
-        , DATE_TRUNC('month', AgentChangeInvite.INVITE_PULL_DATE) AS InviteWave
+        , DATE_TRUNC('month', AgentChangeInvite.UPLOAD_DT) AS InviteWave
         , COUNT(DISTINCT AgentChangeInvite.POLICY_NUMBER) AS InvitesSent
         , ARRAY_AGG(
             OBJECT_CONSTRUCT_KEEP_NULL(
-                'ResponseId', AgentChangeResponses.ResponseId,
-                'ResponseDate', AgentChangeResponses.ResponseDate,
-                'NpsScore', AgentChangeResponses.NpsScore,
-                'VerbatimText', AgentChangeResponses.VerbatimText,
-                'ProcessRatings', OBJECT_CONSTRUCT_KEEP_NULL(
-                    'Rating1', AgentChangeResponses.ProcessRating1,
-                    'Rating2', AgentChangeResponses.ProcessRating2,
-                    'Rating3', AgentChangeResponses.ProcessRating3,
-                    'Rating4', AgentChangeResponses.ProcessRating4,
-                    'Rating5', AgentChangeResponses.ProcessRating5,
-                    'Rating6', AgentChangeResponses.ProcessRating6
-                ),
-                'AgentChangeDetails', OBJECT_CONSTRUCT_KEEP_NULL(
-                    'MeetsNeedsFlag', AgentChangeResponses.MeetsNeedsFlag,
-                    'ReceivedLetterFlag', AgentChangeResponses.ReceivedLetterFlag,
-                    'LetterEffectiveness', AgentChangeResponses.LetterEffectiveness,
-                    'DaysWithoutAgent', AgentChangeResponses.DaysWithoutAgent,
-                    'TransferInitiatedBy', AgentChangeResponses.TransferInitiatedBy,
-                    'NewAgentSeries', AgentChangeResponses.NewAgentSeries
-                ),
-                'SystemIds', OBJECT_CONSTRUCT_KEEP_NULL(
-                    'PolicyNumber', AgentChangeResponses.PolicyNumber,
-                    'AgentId', AgentChangeResponses.AgentId,
-                    'Ecn', AgentChangeResponses.Ecn,
-                    'HouseholdNumber', AgentChangeResponses.HouseholdNumber,
-                    'EcmsAccountNumber', AgentChangeResponses.EcmsAccountNumber
+                'ResponseId', AgentChangeResponses.ResponseId
+                , 'ResponseDate', AgentChangeResponses.ResponseDate
+                , 'NpsScore', AgentChangeResponses.NpsScore
+                , 'VerbatimText', AgentChangeResponses.VerbatimText
+                , 'ProcessRatings', OBJECT_CONSTRUCT_KEEP_NULL(
+                    'Rating1', AgentChangeResponses.ProcessRating1
+                    , 'Rating2', AgentChangeResponses.ProcessRating2
+                    , 'Rating3', AgentChangeResponses.ProcessRating3
+                    , 'Rating4', AgentChangeResponses.ProcessRating4
+                    , 'Rating5', AgentChangeResponses.ProcessRating5
+                    , 'Rating6', AgentChangeResponses.ProcessRating6
+                )
+                , 'AgentChangeDetails', OBJECT_CONSTRUCT_KEEP_NULL(
+                    'MeetsNeedsFlag', AgentChangeResponses.MeetsNeedsFlag
+                    , 'ReceivedLetterFlag', AgentChangeResponses.ReceivedLetterFlag
+                    , 'LetterEffectiveness', AgentChangeResponses.LetterEffectiveness
+                    , 'DaysWithoutAgent', AgentChangeResponses.DaysWithoutAgent
+                    , 'TransferInitiatedBy', AgentChangeResponses.TransferInitiatedBy
+                    , 'NewAgentSeries', AgentChangeResponses.NewAgentSeries
+                )
+                , 'SystemIds', OBJECT_CONSTRUCT_KEEP_NULL(
+                    'PolicyNumber', AgentChangeResponses.PolicyNumber
+                    , 'AgentId', AgentChangeResponses.AgentId
+                    , 'Ecn', AgentChangeResponses.Ecn
+                    , 'HouseholdNumber', AgentChangeResponses.HouseholdNumber
+                    , 'EcmsAccountNumber', AgentChangeResponses.EcmsAccountNumber
                 )
             )
         ) WITHIN GROUP (ORDER BY AgentChangeResponses.ResponseDate) AS Responses
     FROM {{ source('tnps', 'agtchg_invites_sent') }} AS AgentChangeInvite
     LEFT JOIN AgentChangeResponses
         ON AgentChangeInvite.POLICY_NUMBER = AgentChangeResponses.PolicyNumber
+    {% if is_incremental() %}
+    WHERE DATE_TRUNC('month', AgentChangeInvite.UPLOAD_DT) >= DATEADD(
+        'month', -3,
+        (SELECT COALESCE(MAX(SurveyRawPrev.Survey:InviteWave::DATE), CURRENT_DATE) FROM {{ this }} AS SurveyRawPrev)
+    )
+    {% endif %}
     GROUP BY
         'AGENT_CHANGE'
-        , DATE_TRUNC('month', AgentChangeInvite.INVITE_PULL_DATE)
+        , DATE_TRUNC('month', AgentChangeInvite.UPLOAD_DT)
 )
 
 SELECT
     BASE64_ENCODE(SHA2(AgentChangeCampaign.SurveyType || '|' || CAST(AgentChangeCampaign.InviteWave AS VARCHAR), 256)) AS ID
 
     , OBJECT_CONSTRUCT_KEEP_NULL(
-        'SurveyType', AgentChangeCampaign.SurveyType,
-        'InviteWave', CAST(AgentChangeCampaign.InviteWave AS DATE),
-        'InvitesSent', AgentChangeCampaign.InvitesSent,
-        'ResponseCount', ARRAY_SIZE(AgentChangeCampaign.Responses),
-        'ResponseRate', DIV0(ARRAY_SIZE(AgentChangeCampaign.Responses), AgentChangeCampaign.InvitesSent),
-        'Responses', AgentChangeCampaign.Responses
+        'SurveyType', AgentChangeCampaign.SurveyType
+        , 'InviteWave', CAST(AgentChangeCampaign.InviteWave AS DATE)
+        , 'InvitesSent', AgentChangeCampaign.InvitesSent
+        , 'ResponseCount', ARRAY_SIZE(AgentChangeCampaign.Responses)
+        , 'ResponseRate', DIV0(ARRAY_SIZE(AgentChangeCampaign.Responses), AgentChangeCampaign.InvitesSent)
+        , 'Responses', AgentChangeCampaign.Responses
     ) AS Survey
 FROM AgentChangeCampaign

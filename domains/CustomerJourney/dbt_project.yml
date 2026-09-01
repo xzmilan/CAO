@@ -7,37 +7,27 @@ model-paths: ["models"]
 seed-paths: ["seeds"]
 
 seeds:
-  customer_journey:
-    seed_policy:
-      +schema: RAW_POLICY
-    seed_policy_change_event:
-      +schema: RAW_CHANGE_EVENT
+  customer_journey: {}
 
 models:
   customer_journey:
     raw_layer:
       +materialized: table
       Policy:
-        +schema: RAW_POLICY
+        +materialized: incremental
+        +incremental_strategy: merge
+        +unique_key: ID
       ChangeEvent:
-        +schema: RAW_CHANGE_EVENT
+        +materialized: incremental
+        +incremental_strategy: merge
+        +unique_key: ID
       Survey:
-        +schema: RAW_SURVEY
-      Contact:
-        +schema: RAW_CONTACT
+        +materialized: incremental
+        +incremental_strategy: merge
+        +unique_key: ID
     metric_layer:
       +materialized: table
-      Policy_Metrics:
-        +schema: METRICS_POLICY
-      ChangeEvent_Metrics:
-        +schema: METRICS_CHANGE_EVENT
-      Survey_Metrics:
-        +schema: METRICS_SURVEY
-      Contact_Metrics:
-        +schema: METRICS_CONTACT
     wide_layer:
       +materialized: table
-      +schema: WIDE
     view_layer:
       +materialized: view
-      +schema: VIEWS

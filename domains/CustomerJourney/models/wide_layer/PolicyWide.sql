@@ -18,6 +18,7 @@ SELECT
     , OBJECT_CONSTRUCT_KEEP_NULL('CssCesScore', CssCesScore.CssCesScore)::OBJECT(CssCesScore FLOAT) AS CssCesScore
     , OBJECT_CONSTRUCT_KEEP_NULL('InForce90Flag', InForce90Flag.InForce90Flag)::OBJECT(InForce90Flag NUMBER) AS InForce90Flag
     , OBJECT_CONSTRUCT_KEEP_NULL('InceptionMonth', InceptionMonth.InceptionMonth)::OBJECT(InceptionMonth VARCHAR) AS InceptionMonth
+    , OBJECT_CONSTRUCT_KEEP_NULL('LoadMonth', LoadMonth.LoadMonth)::OBJECT(LoadMonth VARCHAR) AS LoadMonth
     , OBJECT_CONSTRUCT_KEEP_NULL('MovedPolicyRetentionRate90Days', MovedPolicyRetentionRate90Days.MovedPolicyRetentionRate90Days)::OBJECT(MovedPolicyRetentionRate90Days FLOAT) AS MovedPolicyRetentionRate90Days
     , OBJECT_CONSTRUCT_KEEP_NULL('NumberOfAgentChangeEvents', NumberOfAgentChangeEvents.NumberOfAgentChangeEvents)::OBJECT(NumberOfAgentChangeEvents NUMBER) AS NumberOfAgentChangeEvents
     , OBJECT_CONSTRUCT_KEEP_NULL('NumberOfAgentChangePoliciesInForce90Days', NumberOfAgentChangePoliciesInForce90Days.NumberOfAgentChangePoliciesInForce90Days)::OBJECT(NumberOfAgentChangePoliciesInForce90Days NUMBER) AS NumberOfAgentChangePoliciesInForce90Days
@@ -46,6 +47,8 @@ INNER JOIN {{ ref('InForce90Flag') }} AS InForce90Flag
     ON Policy.ID = InForce90Flag.ID
 INNER JOIN {{ ref('InceptionMonth') }} AS InceptionMonth
     ON Policy.ID = InceptionMonth.ID
+INNER JOIN {{ ref('LoadMonth') }} AS LoadMonth
+    ON Policy.ID = LoadMonth.ID
 INNER JOIN {{ ref('MovedPolicyRetentionRate90Days') }} AS MovedPolicyRetentionRate90Days
     ON Policy.ID = MovedPolicyRetentionRate90Days.ID
 INNER JOIN {{ ref('NumberOfAgentChangeEvents') }} AS NumberOfAgentChangeEvents

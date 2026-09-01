@@ -161,6 +161,26 @@ models:
       - name: ID
         tests: [not_null, unique]
 
+  - name: LoadMonth
+    description: |
+      ## Purpose
+      Latest archive load month (YYYYMM) per policy, promoted out of the
+      MonthlySnapshots ARRAY. Feeds the F04 scorecard views — replaces the
+      'DEMO' literal previously hardcoded there.
+      ## Business Rules
+      MAX of MonthlySnapshots.LoadYearMonthNum (SNAP_YR_MO_CD minus the dash)
+      via LATERAL FLATTEN. The scorecard is a current-period report — latest
+      snapshot wins.
+    meta:
+      business_steward: "TBD"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "policy"
+      scorecard: "F04"
+    columns:
+      - name: ID
+        tests: [not_null, unique]
+
   - name: MovedPolicyRetentionRate90Days
     description: |
       ## Purpose

@@ -96,6 +96,48 @@ RULE_HELP: dict[str, str] = {
         "item, not a gap we intend to close with tooling.\n"
         f"    Read here for more: {_STANDARDS_DOC} — \"LEFT JOINS\" row."
     ),
+    "MESA-CORE-007": (
+        "Dynamic SQL (EXECUTE IMMEDIATE, IDENTIFIER(), sp_executesql) builds a "
+        "query or object name at runtime, which no validator can ever see — so "
+        "the grain- and identity-safety gates can't check it. MESA definitions "
+        "must be static: use ref()/source() for object names instead of "
+        "assembling them at runtime.\n"
+        f"    Read here for more: {_STANDARDS_DOC} — \"Metric Layer\" / "
+        "\"Raw Layer\" reference sections."
+    ),
+    "MESA-SEC-001": (
+        "A hardcoded secret or credential (API key, password, private key, JWT) "
+        "found in SQL. Anything committed to the model files is in git history "
+        "and the compiled artifact forever — effectively public. Move it to the "
+        "warehouse connection or an environment variable, never into a model file."
+    ),
+    "MESA-SEC-003": (
+        "A bare CAST() — prefer TRY_CAST() (Snowflake) so a single malformed row "
+        "returns NULL instead of failing the whole query on bad data. (A CAST "
+        "inside a hashed-ID / key-concat formula is the one sanctioned exception "
+        "and is not flagged.)\n"
+        f"    Read here for more: {_STANDARDS_DOC} — \"SAFE_CAST / TRY_CAST\" "
+        "Coding Standards row."
+    ),
+    "MESA-SEC-004": (
+        "A division whose denominator isn't wrapped in NULLIF(x, 0). A zero "
+        "denominator can error or silently produce a wrong number. Wrap it: "
+        "numerator / NULLIF(denominator, 0) so it returns NULL instead of failing."
+    ),
+    "MESA-SEC-006": (
+        "A text comparison against a string literal that isn't case-folded. "
+        "Casing differences in the data silently drop rows — wrap both sides "
+        "in UPPER()/LOWER() so the comparison is case-insensitive and matches "
+        "the data as it actually arrives.\n"
+        f"    Read here for more: {_STANDARDS_DOC} — \"UPPER()/LOWER() text "
+        "comparisons\" Coding Standards row."
+    ),
+    "MESA-SEC-007": (
+        "SELECT DISTINCT usually masks a grain problem — a fan-out upstream is "
+        "producing duplicate rows. Fix the grain at the source instead of "
+        "deduping here, or the duplicates will keep reappearing in every "
+        "downstream consumer."
+    ),
 }
 
 _DEFAULT_HELP = (

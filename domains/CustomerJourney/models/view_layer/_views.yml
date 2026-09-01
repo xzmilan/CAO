@@ -104,3 +104,35 @@ models:
       scorecard: "F04"
       journey: "FWS Onboarding"
       jo_source: "docs/JODataNeeds/FWSOnboarding.csv"
+
+  - name: FarmersOnboardingCA
+    description: |
+      ## Purpose
+      New Business cohort scorecard, FARMERS business entity, California state,
+      Auto LOB only, by inception month (F04 pattern — CONTRACT ITEM 4c).
+      State-specific onboarding journey for CA Auto expansion.
+      ## Business Rules
+      Aggregate scorecard view (month grain): COUNT of NB policies
+      (TermType = 'NB', BusinessEntity = 'FARMERS', PolicyStateCode = 'CA',
+      LineOfBusinessCode = 'AUTO') per inception month.
+      90-day retention measured from NB policy inception date.
+      ## JO Sheet Coverage (FarmersOnboardingCA.csv)
+      Policy Count (CA NB Customers), 90-day Retention (count + rate),
+      Onboarding CSAT (post-March 2026).
+      Companion measures not yet in project: Customer/Agent Contacts per 100 PIF
+      (eSignature Dashboard GWPC CA state filter), CA contingency metrics
+      (UW system not yet identified), NB Conversion Rate (requires 12-month
+      policy linking).
+      ## Data Notes
+      CA Auto contingency metrics (Set Vol., Expiration Vol., Vehicle Info
+      contingencies) require underwriting system identification and business
+      rule definition. Contact metrics require eSignature Dashboard CA state
+      filtering. Conversion rate requires archive policy history.
+    meta:
+      business_steward: "Joe Spinelli"
+      technical_steward: "Steve Passanante"
+      prc_classification: "Internal_Confidential"
+      grain: "inception_month"
+      scorecard: "F04"
+      journey: "Farmers Auto Onboarding (CA EA)"
+      jo_source: "docs/JODataNeeds/FarmersOnboardingCA.csv"

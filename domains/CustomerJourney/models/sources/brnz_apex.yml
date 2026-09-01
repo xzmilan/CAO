@@ -43,7 +43,7 @@ sources:
               docs/JODataNeeds/DiagnosisFiles/DIAGNOSE_agent_contacts_join.sql.
             meta:
               declared_because: "usage_rule"
-          - name: PREFERRED_PHONE_NUMBER_C
+          - name: PREFERRED_PHONE_NUMBER__C
             description: |
               Contact's preferred phone number (custom Salesforce field —
               the standard PHONE field isn't the populated one).

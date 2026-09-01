@@ -1,6 +1,8 @@
 name: CustomerJourney dbt Deploy
 
-# CAO (Consumer Analytics Orchestration) — Snowflake deploy/build workflow.# This is the ONLY workflow that touches Snowflake. Cadence is SCHEDULED
+# CAO (Consumer Analytics Orchestration) — Snowflake deploy/build workflow.
+#
+# This is the ONLY workflow that touches Snowflake. Cadence is SCHEDULED
 # (nightly), not per-merge — merges to main just update the branch; the
 # 7am ET run picks up everything accumulated since the prior run in one
 # batched deploy. This is deliberate: with incremental raw models
@@ -17,7 +19,9 @@ name: CustomerJourney dbt Deploy
 # It needs a Snowflake SERVICE ACCOUNT (not a personal account), supplied
 # via GitHub Secrets/Variables. See the CAO README for setup steps.
 #
-# TriFor vice account + op the env: block back to ${{ vars.SNOWFLAKE_* }} / ${{ secrets.SNOWFLAKE_PASSWORD }}
+# Trial-mode deploy — hardcoded to xzmilan's trial Snowflake account.
+# When Farmers IT provisions the service account + opens the IP allowlist,
+# swap the env: block back to ${{ vars.SNOWFLAKE_* }} / ${{ secrets.SNOWFLAKE_PASSWORD }}
 # and point at the Farmers account/role/warehouse/database.
 #
 # CRON NOTE: GitHub Actions schedule cron is ALWAYS UTC, never local time.
@@ -40,14 +44,14 @@ defaults:
 
 jobs:
   deploy:
-    name: Deploy + Build to Snowflake
+    name: Deploy + Build to Snowflake (Trial)
     runs-on: ubuntu-latest
     env:
-      SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
-      SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}
-      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
-      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
-      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_ACCOUNT: RDCAAHU-BL07485
+      SNOWFLAKE_USER: xzmilan
+      SNOWFLAKE_ROLE: ACCOUNTADMIN
+      SNOWFLAKE_WAREHOUSE: COMPUTE_WH
+      SNOWFLAKE_DATABASE: MZ_SF
       SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
@@ -60,20 +64,19 @@ jobs:
         run: pip install snowflake-cli-labs
       - name: Create CUSTOMERJOURNEY schema if needed
         run: |
-          snow sql --temporary-connection -q "CREATE SCHEMA IF NOT EXISTS ${{ env.SNOWFLAKE_DATABASE }}.CUSTOMERJOURNEY"
+          snow sql --temporary-connection -q "CREATE SCHEMA IF NOT EXISTS MZ_SF.CUSTOMERJOURNEY"
       - name: Deploy DBT PROJECT
         run: |
           snow dbt deploy customer_journey \
             --temporary-connection \
             --source . \
-            --database ${{ env.SNOWFLAKE_DATABASE }} \
+            --database MZ_SF \
             --schema CUSTOMERJOURNEY \
             --dbt-version 1.11.11
       - name: Execute build
         run: |
           snow dbt execute customer_journey \
             --temporary-connection \
-            --database ${{ env.SNOWFLAKE_DATABASE }} \
+            --database MZ_SF \
             --schema CUSTOMERJOURNEY \
-            build --target prod
-
+            build --target dev

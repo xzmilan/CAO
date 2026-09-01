@@ -560,6 +560,233 @@ def check_subquery_in_join_where(sql: str) -> list[dict]:
     return violations
 
 
+# ── Shared helper: SQL body with comments + jinja + casts neutralised ────────
+def _neutralise_for_scan(sql: str) -> str:
+    """
+    Return the SQL with -- line comments blanked, /* */ block comments blanked,
+    and jinja tokens protected, so the safety-rule scanners below never match
+    inside a comment or a {{ ... }} block.
+
+    NOTE: object casts (::OBJECT(...)) are NOT protected here. They contain none
+    of the things the safety scanners look for (no CAST(, no division, no
+    secrets, no text comparison, no SELECT DISTINCT), AND the object-cast
+    placeholder ends in `*/` whose `/` would false-trigger the division check
+    against the following `AS Metric`. So we leave casts in place and rely on
+    comment-blanking alone to skip noise.
+    """
+    protected, _ = _protect_jinja(sql)
+    out_lines: list[str] = []
+    in_block = False
+    for line in protected.split("\n"):
+        stripped = line.lstrip()
+        if in_block:
+            if "*/" in line:
+                in_block = False
+            out_lines.append("")
+            continue
+        if stripped.startswith("/*"):
+            if "*/" not in line:
+                in_block = True
+            out_lines.append("")
+            continue
+        if stripped.startswith("--"):
+            out_lines.append("")
+            continue
+        out_lines.append(line)
+    return "\n".join(out_lines)
+
+
+# ── MESA-CORE-007: No dynamic SQL / identifier construction (BLOCK) ──────────
+_DYNAMIC_SQL_RE = re.compile(
+    r"\bEXECUTE\s+IMMEDIATE\b|\bsp_executesql\b|\bIDENTIFIER\s*\(",
+    re.IGNORECASE,
+)
+
+
+def check_no_dynamic_sql(sql: str) -> list[dict]:
+    """
+    MESA-CORE-007 — block runtime SQL/identifier construction. EXECUTE IMMEDIATE,
+    sp_executesql, and IDENTIFIER(...) assemble a query/object name at runtime,
+    which no static validator can see — so grain and identity checks fail OPEN.
+    MESA definitions must be static; use ref()/source() for object names.
+    """
+    violations: list[dict] = []
+    scan = _neutralise_for_scan(sql)
+    for m in _DYNAMIC_SQL_RE.finditer(scan):
+        lineno = scan[: m.start()].count("\n") + 1
+        violations.append({
+            "rule": "MESA-CORE-007",
+            "message": (
+                f"Dynamic SQL / runtime identifier construction "
+                f"('{m.group(0).strip()}') detected at line {lineno}. MESA "
+                f"definitions must be static — use ref()/source() for object "
+                f"names, never EXECUTE IMMEDIATE or IDENTIFIER(). Dynamic SQL "
+                f"defeats grain and identity validation."
+            ),
+        })
+    return violations
+
+
+# ── MESA-SEC-001: No hardcoded secrets/credentials (BLOCK) ───────────────────
+_SECRET_PATTERNS: list[tuple[str, re.Pattern]] = [
+    ("AWS access key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("credential assignment",
+     re.compile(r"(?i)\b(password|passwd|pwd|secret|api[_-]?key|access[_-]?key|token)\s*[:=]\s*['\"][^'\"]{4,}['\"]")),
+    ("private key block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    ("JWT literal", re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+")),
+]
+
+
+def check_no_secrets(sql: str) -> list[dict]:
+    """
+    MESA-SEC-001 — block hardcoded secrets. A credential in SQL leaks into git
+    history and the compiled artifact, where it is effectively public forever.
+    Secrets belong in the warehouse connection / env, never in a model file.
+    """
+    violations: list[dict] = []
+    scan = _neutralise_for_scan(sql)
+    for label, pattern in _SECRET_PATTERNS:
+        for m in pattern.finditer(scan):
+            lineno = scan[: m.start()].count("\n") + 1
+            violations.append({
+                "rule": "MESA-SEC-001",
+                "message": (
+                    f"Possible hardcoded secret ({label}) at line {lineno}. "
+                    f"Credentials must never appear in model SQL — they leak "
+                    f"into git history and the compiled artifact. Move it to the "
+                    f"warehouse connection or an environment variable."
+                ),
+            })
+    return violations
+
+
+# ── MESA-SEC-003: SAFE_CAST/TRY_CAST, never bare CAST (WARN) ──────────────────
+_BARE_CAST_RE = re.compile(r"(?<![A-Za-z_])CAST\s*\(", re.IGNORECASE)
+# A bare CAST inside a hashed-ID formula is the sanctioned exception — the ID
+# doctrine is BASE64_ENCODE(SHA2(CAST(<key> AS ...))) and CONCAT_WS keys cast
+# their parts. Recognise a hash/encode wrapper within ~80 chars before the CAST.
+_HASH_WRAPPER_RE = re.compile(
+    r"(?i)(?:base64_encode|sha2|sha256|md5|to_base64|concat_ws|concat)\s*\([^;]*$"
+)
+
+
+def check_bare_cast(sql: str) -> list[dict]:
+    """
+    MESA-SEC-003 — prefer TRY_CAST (Snowflake) / SAFE_CAST (BigQuery) over bare
+    CAST. A bare CAST kills the whole query on one bad row; the safe forms return
+    NULL instead. Exception: a CAST inside a hashed-ID / key-concat formula is
+    sanctioned (the ID doctrine itself uses it), so it is not flagged.
+    """
+    violations: list[dict] = []
+    scan = _neutralise_for_scan(sql)
+    for m in _BARE_CAST_RE.finditer(scan):
+        # Skip SAFE_CAST/TRY_CAST — the negative lookbehind already blocks the
+        # underscore, but guard the space form (e.g. "SAFE_CAST (") too.
+        preceding = scan[max(0, m.start() - 12): m.start()]
+        if re.search(r"(?i)(?:SAFE|TRY)_\s*$", preceding):
+            continue
+        # Skip the hashed-ID / key-concat exception.
+        head = scan[max(0, m.start() - 80): m.start()]
+        if _HASH_WRAPPER_RE.search(head):
+            continue
+        lineno = scan[: m.start()].count("\n") + 1
+        violations.append({
+            "rule": "MESA-SEC-003",
+            "message": (
+                f"Bare CAST() at line {lineno} — use TRY_CAST() (Snowflake) so a "
+                f"single malformed row returns NULL instead of failing the whole "
+                f"query. (A CAST inside a hashed-ID/key formula is exempt.)"
+            ),
+        })
+    return violations
+
+
+# ── MESA-SEC-004: divide-by-zero guard (WARN) ────────────────────────────────
+_DIVISION_RE = re.compile(r"/\s*([A-Za-z_][\w.]*|\()")
+
+
+def check_divide_by_zero(sql: str) -> list[dict]:
+    """
+    MESA-SEC-004 — a division whose denominator is not wrapped in NULLIF(x, 0)
+    can error or silently produce a wrong/blank number. Wrap denominators:
+    numerator / NULLIF(denominator, 0).
+    """
+    violations: list[dict] = []
+    scan = _neutralise_for_scan(sql)
+    for m in _DIVISION_RE.finditer(scan):
+        # Look at what immediately follows the '/'. If it opens NULLIF(, it's guarded.
+        after = scan[m.start() + 1:].lstrip()
+        if re.match(r"(?i)NULLIF\s*\(", after):
+            continue
+        lineno = scan[: m.start()].count("\n") + 1
+        violations.append({
+            "rule": "MESA-SEC-004",
+            "message": (
+                f"Division at line {lineno} without a NULLIF denominator guard. "
+                f"Wrap the denominator: numerator / NULLIF(denominator, 0) so a "
+                f"zero denominator returns NULL instead of erroring."
+            ),
+        })
+    return violations
+
+
+# ── MESA-SEC-006: case-fold text comparisons (WARN) ──────────────────────────
+# Flag  <alias>.<col> = '<literal>'  where neither side is wrapped in UPPER/LOWER.
+_TEXT_COMPARE_RE = re.compile(
+    r"(?<![A-Za-z_])([A-Za-z_]\w*(?:\.\w+)?)\s*(=|!=|<>)\s*'[^']*'"
+)
+
+
+def check_text_comparison_casefold(sql: str) -> list[dict]:
+    """
+    MESA-SEC-006 — a text comparison against a string literal that isn't
+    case-folded is data-dependent and silently wrong (passes in dev, fails on
+    one prod row). Wrap both sides: UPPER(col) = UPPER('literal').
+    """
+    violations: list[dict] = []
+    scan = _neutralise_for_scan(sql)
+    for m in _TEXT_COMPARE_RE.finditer(scan):
+        # If the column reference is already inside UPPER(/LOWER(, skip.
+        before = scan[max(0, m.start() - 8): m.start()]
+        if re.search(r"(?i)(?:UPPER|LOWER)\s*\($", before):
+            continue
+        lineno = scan[: m.start()].count("\n") + 1
+        violations.append({
+            "rule": "MESA-SEC-006",
+            "message": (
+                f"Text comparison '{m.group(1)} {m.group(2)} '...'' at line "
+                f"{lineno} isn't case-folded. Wrap both sides in UPPER()/LOWER() "
+                f"so casing differences in the data don't silently drop rows."
+            ),
+        })
+    return violations
+
+
+# ── MESA-SEC-007: no SELECT DISTINCT crutch (WARN) ───────────────────────────
+_SELECT_DISTINCT_RE = re.compile(r"\bSELECT\s+DISTINCT\b", re.IGNORECASE)
+
+
+def check_no_select_distinct(sql: str) -> list[dict]:
+    """
+    MESA-SEC-007 — SELECT DISTINCT usually hides a grain problem, which is the
+    exact thing MESA exists to surface. If you need it to dedupe, the fan-out
+    upstream is the real issue — fix the grain, don't paper over it.
+    """
+    violations: list[dict] = []
+    scan = _neutralise_for_scan(sql)
+    for m in _SELECT_DISTINCT_RE.finditer(scan):
+        lineno = scan[: m.start()].count("\n") + 1
+        violations.append({
+            "rule": "MESA-SEC-007",
+            "message": (
+                f"SELECT DISTINCT at line {lineno} — this usually masks a grain "
+                f"problem (a fan-out upstream producing duplicate rows). Fix the "
+                f"grain at the source instead of deduping here."
+            ),
+        })
+    return violations
+
+
 # ── FIELD-PREFIX-WARN (multi-table bare-column detector) ─────────────────────
 def check_missing_field_prefix(sql: str, alias_map: dict[str, str]) -> list[dict]:
     """
@@ -859,6 +1086,15 @@ def lint_snowflake_sql(
     for _m in _FROM_JOIN_REF_RE.finditer(sql):
         _alias_map[_m.group(2)] = _m.group(1)
     findings.extend(check_missing_field_prefix(sql, _alias_map))
+
+    # 1d. MESA safety rules (SEC-* + CORE-007). SEC-001/CORE-007 are BLOCK;
+    # SEC-003/004/006/007 are WARN (lint_all.py routes them via _WARN_RULES).
+    findings.extend(check_no_dynamic_sql(sql))
+    findings.extend(check_no_secrets(sql))
+    findings.extend(check_bare_cast(sql))
+    findings.extend(check_divide_by_zero(sql))
+    findings.extend(check_text_comparison_casefold(sql))
+    findings.extend(check_no_select_distinct(sql))
 
     # 2. sqlfluff lint (not fix) with protections
     try:

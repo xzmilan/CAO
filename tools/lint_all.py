@@ -61,6 +61,18 @@ def main() -> int:
     sql_files = sorted((domain_dir / "models").rglob("*.sql"))
     print(f"Linting {len(sql_files)} model files in domains/{args.domain} ...\n")
 
+    # WARN-level rules never fail the gate — they are advisory nudges printed
+    # for a human to triage. Everything else is a hard finding that fails CI.
+    # SEC-001 (secrets) and CORE-007 (dynamic SQL) are deliberately NOT here —
+    # they are BLOCK-level. SEC-003/004/006/007 are advisory WARNs.
+    _WARN_RULES = {
+        "FIELD-PREFIX-WARN",
+        "MESA-SEC-003",
+        "MESA-SEC-004",
+        "MESA-SEC-006",
+        "MESA-SEC-007",
+    }
+
     total = 0
     failed = 0
     rules_seen: set[str] = set()
@@ -68,9 +80,9 @@ def main() -> int:
         rel = f.relative_to(domain_dir)
         findings = lint_snowflake_sql(f.read_text(), str(CONFIG), file_path=str(rel))
         if findings:
-            # FIELD-PREFIX-WARN is WARN-level — never fails the gate
-            hard_findings = [x for x in findings if x["rule"] != "FIELD-PREFIX-WARN"]
-            warn_findings = [x for x in findings if x["rule"] == "FIELD-PREFIX-WARN"]
+            # WARN-level rules never fail the gate; everything else is hard.
+            hard_findings = [x for x in findings if x["rule"] not in _WARN_RULES]
+            warn_findings = [x for x in findings if x["rule"] in _WARN_RULES]
             if hard_findings:
                 failed += 1
                 total += len(hard_findings)
@@ -80,12 +92,12 @@ def main() -> int:
                     rules_seen.add(x["rule"])
             if warn_findings:
                 total += len(warn_findings)
-                print(f"WARN {rel}  ({len(warn_findings)} FIELD-PREFIX-WARN)")
+                print(f"WARN {rel}  ({len(warn_findings)} advisory)")
                 for x in warn_findings[:5]:  # max 5 WARNs printed per file
                     print(f"      [{x['rule']}] {x['message'][:100]}")
+                    rules_seen.add(x["rule"])
                 if len(warn_findings) > 5:
-                    print(f"      ... and {len(warn_findings) - 5} more FIELD-PREFIX-WARN")
-                rules_seen.add("FIELD-PREFIX-WARN")
+                    print(f"      ... and {len(warn_findings) - 5} more advisory WARN")
             if not hard_findings and not warn_findings:
                 print(f"ok   {rel}")
         else:

@@ -10,8 +10,7 @@ sources:
     database: PRD_EDBIDB
     schema: RTEN
     description: |
-      RTEN retention source tables. These are trial-account mirrors of the
-      production tables — same shape, subset of data.
+      RTEN retention source tables (production).
 
       ⚠ READ THIS BEFORE TOUCHING rten_dim_pl_trn_xlob:
       That table is 421M rows / 172 GB — the policy TRANSACTION dimension,
@@ -21,7 +20,7 @@ sources:
       raw entities are built from — not so you can build on it yourself.
     meta:
       owner: "EDBI platform team"
-      environment_note: "Trial mirrors — validate against prod before Farmers deploy"
+      environment_note: "Production source"
     tables:
       - name: rten_xcmpy_pif_tbl
         description: |
