@@ -33,6 +33,12 @@ name: CustomerJourney dbt Deploy
 # --temporary-connection mode reads automatically alongside the other
 # SNOWFLAKE_* generic env vars. No file is written to disk.
 #
+# If the .p8 key was generated with a passphrase (encrypted private key),
+# also set a SNOWFLAKE_PRIVATE_KEY_PASSPHRASE repo Secret — the Snowflake
+# connector reads it from the PRIVATE_KEY_PASSPHRASE env var below. If the
+# key has NO passphrase, leave that secret unset; the env var will resolve
+# to an empty string, which the connector treats as "no passphrase."
+#
 # CRON NOTE: GitHub Actions schedule cron is ALWAYS UTC, never local time.
 # 7:00 AM ET = 12:00 UTC during EST (standard time, ~early Nov–early Mar)
 # but 11:00 UTC during EDT (daylight time, ~mid-Mar–early Nov). GitHub
@@ -63,6 +69,7 @@ jobs:
       SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
       SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
       SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+      PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
