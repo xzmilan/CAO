@@ -23,6 +23,7 @@ logs/
 secrets.toml
 *.pem
 *.key
+*.p8
 
 # Editors
 .vscode/

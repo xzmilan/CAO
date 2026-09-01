@@ -19,10 +19,19 @@ name: CustomerJourney dbt Deploy
 # It needs a Snowflake SERVICE ACCOUNT (not a personal account), supplied
 # via GitHub Secrets/Variables. See the CAO README for setup steps.
 #
-# Trial-mode deploy — hardcoded to xzmilan's trial Snowflake account.
-# When Farmers IT provisions the service account + opens the IP allowlist,
-# swap the env: block back to ${{ vars.SNOWFLAKE_* }} / ${{ secrets.SNOWFLAKE_PASSWORD }}
-# and point at the Farmers account/role/warehouse/database.
+# Connection details come from a Snowflake SERVICE ACCOUNT supplied via
+# GitHub Secrets/Variables (not hardcoded). Set SNOWFLAKE_ACCOUNT, _USER,
+# _ROLE, _WAREHOUSE, and _DATABASE as repo Variables (Settings > Secrets and
+# variables > Actions > Variables tab), and SNOWFLAKE_PRIVATE_KEY as a repo
+# Secret (same page, Secrets tab), before enabling this workflow.
+#
+# AUTH METHOD: key-pair (SNOWFLAKE_JWT), not password/SSO. The service
+# account's public key is registered on the Snowflake user via
+# ALTER USER ... SET RSA_PUBLIC_KEY = '...'. The private key never touches
+# this repo — it's read at runtime from the SNOWFLAKE_PRIVATE_KEY secret and
+# passed to `snow` via the SNOWFLAKE_PRIVATE_KEY_RAW env var, which the CLI's
+# --temporary-connection mode reads automatically alongside the other
+# SNOWFLAKE_* generic env vars. No file is written to disk.
 #
 # CRON NOTE: GitHub Actions schedule cron is ALWAYS UTC, never local time.
 # 7:00 AM ET = 12:00 UTC during EST (standard time, ~early Nov–early Mar)
@@ -44,15 +53,16 @@ defaults:
 
 jobs:
   deploy:
-    name: Deploy + Build to Snowflake (Trial)
+    name: Deploy + Build to Snowflake
     runs-on: ubuntu-latest
     env:
-      SNOWFLAKE_ACCOUNT: RDCAAHU-BL07485
-      SNOWFLAKE_USER: xzmilan
-      SNOWFLAKE_ROLE: ACCOUNTADMIN
-      SNOWFLAKE_WAREHOUSE: COMPUTE_WH
-      SNOWFLAKE_DATABASE: MZ_SF
-      SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+      SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}
+      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
+      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
+      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
+      SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
+      SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -64,19 +74,19 @@ jobs:
         run: pip install snowflake-cli-labs
       - name: Create CUSTOMERJOURNEY schema if needed
         run: |
-          snow sql --temporary-connection -q "CREATE SCHEMA IF NOT EXISTS MZ_SF.CUSTOMERJOURNEY"
+          snow sql --temporary-connection -q "CREATE SCHEMA IF NOT EXISTS $SNOWFLAKE_DATABASE.CUSTOMERJOURNEY"
       - name: Deploy DBT PROJECT
         run: |
           snow dbt deploy customer_journey \
             --temporary-connection \
             --source . \
-            --database MZ_SF \
+            --database $SNOWFLAKE_DATABASE \
             --schema CUSTOMERJOURNEY \
             --dbt-version 1.11.11
       - name: Execute build
         run: |
           snow dbt execute customer_journey \
             --temporary-connection \
-            --database MZ_SF \
+            --database $SNOWFLAKE_DATABASE \
             --schema CUSTOMERJOURNEY \
             build --target dev

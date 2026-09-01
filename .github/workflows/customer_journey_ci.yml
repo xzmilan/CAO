@@ -68,7 +68,7 @@ jobs:
   # gates run in this same run, exactly like before this job existed.
   #
   # Guarded to same-repo PRs only: a fork PR's GITHUB_TOKEN cannot push to
-  # the fork, so the job would always fail. xzmilan/CAO has no external
+  # the fork, so the job would always fail. There are no external
   # contributors today, but the guard keeps it correct if that changes.
   #
   # CRITICAL: the commit-push steps below MUST use github-actions[bot] as

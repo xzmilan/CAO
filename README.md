@@ -37,9 +37,13 @@ CAO/
    - **SQLFluff lint** — style against `.sqlfluff`.
    - **dbt compile** — Jinja + DAG validation (no warehouse needed).
 3. CODEOWNERS reviewer approves; branch protection requires green checks.
-4. Merge to `main` → the **deploy** job pushes to Snowflake via
-   `snow dbt deploy --temporary-connection` and runs the build.
-   (Currently gated `if: false` until Snowflake is reachable from CI runners.)
+4. Merge to `main` → the **deploy** job (`customer_journey_deploy.yml`,
+   scheduled nightly + manual `workflow_dispatch`) pushes to Snowflake via
+   `snow dbt deploy --temporary-connection` and runs the build. Auth is
+   key-pair (`SNOWFLAKE_JWT`) against a Snowflake service account — see the
+   comment header in that workflow file for the required repo Variables
+   (`SNOWFLAKE_ACCOUNT`, `_USER`, `_ROLE`, `_WAREHOUSE`, `_DATABASE`) and
+   Secret (`SNOWFLAKE_PRIVATE_KEY`).
 
 ## Docs
 
