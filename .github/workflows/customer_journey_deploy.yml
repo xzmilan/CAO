@@ -79,6 +79,11 @@ jobs:
         run: python3 tools/generate_wide_layer.py
       - name: Install Snowflake CLI
         run: pip install snowflake-cli-labs
+      - name: Report runner egress IP
+        run: |
+          IP=$(curl -s https://api.ipify.org)
+          echo "runner_egress_ip=$IP"
+          curl -s "https://ipinfo.io/$IP/json"
       - name: Create CUSTOMERJOURNEY schema if needed
         run: |
           snow sql --temporary-connection -q "CREATE SCHEMA IF NOT EXISTS $SNOWFLAKE_DATABASE.CUSTOMERJOURNEY"
