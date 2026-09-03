@@ -16,28 +16,14 @@ name: CustomerJourney dbt Deploy
 # checks never depend on Snowflake secrets that may not be provisioned yet —
 # your PR can pass all the rules without IT having set anything up.
 #
-# It needs a Snowflake SERVICE ACCOUNT (not a personal account), supplied
-# via GitHub Secrets/Variables. Service Account svc-cx-snfl-git provisioned
-# See the CAO README for setup steps or for changes. 
-#
-# Connection details come from the service account. Set SNOWFLAKE_ACCOUNT, _USER,
-# _ROLE, _WAREHOUSE, and _DATABASE as repo Variables (Settings > Secrets and
-# variables > Actions > Variables tab), and SNOWFLAKE_PRIVATE_KEY + SNOWFLAKE_PRIVATE_KEY_PASSPHRASE 
-#
-# AUTH METHOD: key-pair (SNOWFLAKE_JWT), not password/SSO. The service
-# account's public key is registered on the Snowflake user via
-# ALTER USER ... SET RSA_PUBLIC_KEY = '...'. The private key never touches
-# this repo — it's read at runtime from the SNOWFLAKE_PRIVATE_KEY secret and
-# passed to `snow` via the SNOWFLAKE_PRIVATE_KEY_RAW env var, which the CLI's
-# --temporary-connection mode reads automatically alongside the other
-# SNOWFLAKE_* generic env vars. No file is written to disk.
-#
-# Key was generated with a passphrase (it is the service account password found in PAR)
-# by SnowFlake team. (AIS DB2 group, INC24167623).
-# also set a SNOWFLAKE_PRIVATE_KEY_PASSPHRASE repo Secret — the Snowflake
-# connector reads it from the PRIVATE_KEY_PASSPHRASE env var below. If the
-# key has NO passphrase, leave that secret unset; the env var will resolve
-# to an empty string, which the connector treats as "no passphrase."
+# CURRENT STATE (trial account, password auth): this deploys against
+# xzmilan's personal Snowflake trial account (RDCAAHU-BL07485), hardcoded
+# below as plain env values — no repo Variables needed. The only secret
+# required is SNOWFLAKE_PASSWORD (Settings > Secrets and variables > Actions
+# > Secrets tab). When Farmers IT provisions the real service account
+# (svc-cx-snfl-git, key-pair/SNOWFLAKE_JWT auth), swap the env: block back
+# to vars.SNOWFLAKE_* + SNOWFLAKE_PRIVATE_KEY/SNOWFLAKE_PRIVATE_KEY_PASSPHRASE
+# secrets and point at the Farmers account/role/warehouse/database.
 #
 # CRON NOTE: GitHub Actions schedule cron is ALWAYS UTC, never local time.
 # 7:00 AM ET = 12:00 UTC during EST (standard time). 
@@ -60,14 +46,15 @@ jobs:
     name: Deploy + Build to Snowflake
     runs-on: ubuntu-latest
     env:
-      SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
-      SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}
-      SNOWFLAKE_ROLE: ${{ vars.SNOWFLAKE_ROLE }}
-      SNOWFLAKE_WAREHOUSE: ${{ vars.SNOWFLAKE_WAREHOUSE }}
-      SNOWFLAKE_DATABASE: ${{ vars.SNOWFLAKE_DATABASE }}
-      SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
-      SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
-      PRIVATE_KEY_PASSPHRASE: ${{ secrets.SNOWFLAKE_PRIVATE_KEY_PASSPHRASE }}
+      # Hardcoded to xzmilan's personal trial account — password auth via
+      # the SNOWFLAKE_PASSWORD repo secret (the only Snowflake secret
+      # actually set on this repo today). No repo Variables needed.
+      SNOWFLAKE_ACCOUNT: RDCAAHU-BL07485
+      SNOWFLAKE_USER: xzmilan
+      SNOWFLAKE_ROLE: ACCOUNTADMIN
+      SNOWFLAKE_WAREHOUSE: COMPUTE_WH
+      SNOWFLAKE_DATABASE: MZ_SF
+      SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
