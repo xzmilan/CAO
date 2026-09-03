@@ -8,23 +8,28 @@ name: CustomerJourney dbt CI
 #
 # Auto-Config for Github Actions. This workflow runs on PRs merged to main,  
 # and on a schedule (see below). It runs the following gates:
-# 4 jobs run before a PR will merge. None of them touch Snowflake:
-#   auto-fix        — sqlfluff fix mode (cosmetic only); pushes a commit and
-#                     exits 1 to trigger a clean re-run when it changes code.
-#   lint            — lint_all.py: Snowflake-syntax-safe sqlfluff + CAO
-#                     identifier doctrine (ID, UPPER_SNAKE, PascalCase).
-#   column-contracts — check_column_contracts.py: diff-scoped column-contract
-#                     break detection + hard-fails SELECT * over ref().
-#   compile         — dbt parse: validates Jinja + DAG (broken ref()/source(),
-#                     circular deps) so you find out at PR time, not deploy.
+# 5 jobs run before a PR will merge. None of them touch Snowflake:
+#   auto-fix            — sqlfluff fix mode (cosmetic only); pushes a commit and
+#                         exits 1 to trigger a clean re-run when it changes code.
+#   lint                — lint_all.py: Snowflake-syntax-safe sqlfluff + CAO
+#                         identifier doctrine (ID, UPPER_SNAKE, PascalCase).
+#   wide-layer-assembly — regenerates the gitignored combiner + wide files and
+#                         uploads them for the downstream gates (artifact handoff).
+#   column-contracts    — check_column_contracts.py: diff-scoped column-contract
+#                         break detection + hard-fails SELECT * over ref().
+#   compile             — dbt parse: validates Jinja + DAG (broken ref()/source(),
+#                         circular deps) so you find out at PR time, not deploy.
 #
 # Metric combiners (<entity>_metrics.sql) and wide-layer tables
 # (<Entity>Wide.sql) are NOT committed — they are gitignored and regenerated
 # fresh on the runner from models/metric_layer/<Entity>_Metrics/ (the source
 # of truth) by tools/generate_metrics_combiner.py + generate_wide_layer.py.
-# Both the column-contracts and compile jobs run those generators first, so
-# the file/ref graph they parse is always in sync with the metric files. This
-# removes drift entirely — there is no committed copy to fall out of date.
+# The dedicated wide-layer-assembly job runs those generators once and uploads
+# the result as a workflow artifact; column-contracts and compile download it
+# (GitHub Actions jobs are isolated — a file generated in one job doesn't
+# survive into the next) so the file/ref graph they parse is always in sync
+# with the metric files. This removes drift entirely — no committed copy to
+# fall stale.
 #
 # The deploy/build to Snowflake lives in a SEPARATE workflow
 # (customer_journey_deploy.yml, push-to-main only). Keeping it separate means
@@ -172,7 +177,35 @@ jobs:
       - name: CAO lint gate (colons/OBJECT-safe + identifier doctrine)
         run: python3 ../../tools/lint_all.py --domain CustomerJourney
 
-  # ── Job 2: Column-Contract Gate ────────────────────────────────────────
+  # ── Job 2: Wide-Layer Auto-Assembly ─────────────────────────────────────
+  # Regenerates the gitignored metric combiners (<entity>_metrics.sql) and
+  # wide-layer tables (<Entity>Wide.sql) from models/metric_layer/<Entity>_Metrics/
+  # — the source of truth — and uploads them as a workflow artifact. GitHub
+  # Actions jobs are isolated: a file generated here is discarded when the job
+  # ends, so this is the single canonical place assembly happens, and the
+  # downstream gates download it rather than regenerating it themselves.
+  wide-layer-assembly:
+    name: Wide-Layer Auto-Assembly
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Generate metric combiners + wide layer (not committed)
+        run: |
+          python3 tools/generate_metrics_combiner.py
+          python3 tools/generate_wide_layer.py
+      - name: Upload assembled models
+        uses: actions/upload-artifact@v4
+        with:
+          name: customer-journey-assembly
+          path: |
+            domains/CustomerJourney/models/metric_layer/*_metrics.sql
+            domains/CustomerJourney/models/wide_layer/*.sql
+
+  # ── Job 3: Column-Contract Gate ────────────────────────────────────────
   # Catches the failure dbt parse can't: a renamed/deleted field in an
   # upstream model silently breaking every downstream Alias.Object:Field
   # reference — previously only discovered at deploy time in Snowflake.
@@ -181,11 +214,13 @@ jobs:
   # warehouse. Also hard-fails SELECT * over ref() — CAO doctrine, now
   # machine-enforced.
   #
-  # Needs fetch-depth: 0 so the diff against origin/main works.
+  # Downloads the assembled combiner + wide files from wide-layer-assembly
+  # (jobs are isolated — a fresh checkout has only the metric files, not the
+  # generated ones). Needs fetch-depth: 0 so the diff vs origin/main works.
   column-contracts:
     name: Column-Contract Gate
     runs-on: ubuntu-latest
-    needs: lint
+    needs: wide-layer-assembly
     steps:
       - uses: actions/checkout@v4
         with:
@@ -193,14 +228,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Generate metric combiners + wide layer (not committed)
-        run: |
-          python3 tools/generate_metrics_combiner.py
-          python3 tools/generate_wide_layer.py
+      - name: Download assembled models
+        uses: actions/download-artifact@v4
+        with:
+          name: customer-journey-assembly
+          path: ${{ github.workspace }}
       - name: Column-contract gate (diff-scoped, read-only)
         run: python3 ../../tools/check_column_contracts.py --domain CustomerJourney
 
-  # ── Job 3: dbt Compile ─────────────────────────────────────────────────
+  # ── Job 4: dbt Compile ─────────────────────────────────────────────────
   # Validates Jinja + the DAG WITHOUT touching Snowflake. dbt parse catches
   # broken ref() and source() calls — it checks that every model you
   # reference actually exists in the project, that there are no circular
@@ -218,10 +254,11 @@ jobs:
           python-version: "3.12"
       - name: Install dbt
         run: pip install "dbt-core<2.0" "dbt-snowflake<2.0"
-      - name: Generate metric combiners + wide layer (not committed)
-        run: |
-          python3 tools/generate_metrics_combiner.py
-          python3 tools/generate_wide_layer.py
+      - name: Download assembled models
+        uses: actions/download-artifact@v4
+        with:
+          name: customer-journey-assembly
+          path: ${{ github.workspace }}
       - name: dbt parse (validates Jinja + DAG references)
         env:
           DBT_PROFILES_DIR: .
