@@ -10,6 +10,7 @@ SELECT
     , AVG(TRY_CAST(Response.value:AgentChangeDetails:DaysWithoutAgent::VARCHAR AS NUMBER)) AS AgentChangeAvgDaysWithoutAgent
 FROM {{ ref('SurveyRaw') }} AS Survey
 CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Responses) AS Response
-WHERE Survey.SurveyType = 'AGENT_CHANGE'
-  AND Response.value:AgentChangeDetails:DaysWithoutAgent IS NOT NULL
+WHERE
+    Survey.SurveyType = 'AGENT_CHANGE'
+    AND Response.value:AgentChangeDetails:DaysWithoutAgent IS NOT NULL
 GROUP BY Survey.ID

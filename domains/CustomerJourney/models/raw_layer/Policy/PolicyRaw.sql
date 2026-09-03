@@ -24,12 +24,12 @@ WITH LatestTransaction AS (
         , PolicyTransaction.RESDC_ZIP_5_CD AS ZipCode
         , PolicyTransaction.SRC_TRANS_TMSP AS LatestTransactionTimestamp
     FROM {{ source('rten', 'rten_dim_pl_trn_xlob') }} AS PolicyTransaction
-    {% if is_incremental() %}
-    WHERE PolicyTransaction.SRC_TRANS_TMSP > (
-        SELECT COALESCE(MAX(PolicyRawPrev.SystemIds:LastTransactionTmsp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
-        FROM {{ this }} AS PolicyRawPrev
-    )
-    {% endif %}
+    
+        WHERE PolicyTransaction.SRC_TRANS_TMSP > (
+            SELECT COALESCE(MAX(PolicyRawPrev.SystemIds:LastTransactionTmsp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
+            FROM {{ this }} AS PolicyRawPrev
+        )
+    
     QUALIFY ROW_NUMBER() OVER (
         PARTITION BY PolicyTransaction.PLCY_CNTRCT_NUM
         ORDER BY PolicyTransaction.EFF_DT DESC, PolicyTransaction.SRC_TRANS_TMSP DESC
@@ -50,17 +50,18 @@ WITH LatestTransaction AS (
         , PolicyStats.SRC_SYS
         , PolicyStats.SRC_TRANS_TMSP
     FROM {{ source('fdr', 'fdr_mdm_plcy_stats') }} AS PolicyStats
-    WHERE PolicyStats.END_DT_TMSP = '2999-12-31'::TIMESTAMP_NTZ
-    {% if is_incremental() %}
-    AND PolicyStats.PLCY_NUM IN (
-        SELECT DISTINCT PolicyStatsNew.PLCY_NUM
-        FROM {{ source('fdr', 'fdr_mdm_plcy_stats') }} AS PolicyStatsNew
-        WHERE PolicyStatsNew.SRC_TRANS_TMSP > (
-            SELECT COALESCE(MAX(PolicyRawPrev.SystemIds:LastPolicyStatsTmsp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
-            FROM {{ this }} AS PolicyRawPrev
-        )
-    )
-    {% endif %}
+    WHERE
+        PolicyStats.END_DT_TMSP = '2999-12-31'::TIMESTAMP_NTZ
+        
+            AND PolicyStats.PLCY_NUM IN (
+                SELECT DISTINCT PolicyStatsNew.PLCY_NUM
+                FROM {{ source('fdr', 'fdr_mdm_plcy_stats') }} AS PolicyStatsNew
+                WHERE PolicyStatsNew.SRC_TRANS_TMSP > (
+                    SELECT COALESCE(MAX(PolicyRawPrev.SystemIds:LastPolicyStatsTmsp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
+                    FROM {{ this }} AS PolicyRawPrev
+                )
+            )
+        
     QUALIFY ROW_NUMBER() OVER (
         PARTITION BY PolicyStats.PLCY_NUM
         ORDER BY PolicyStats.SRC_TRANS_TMSP DESC, PolicyStats.STRT_DT_TMSP DESC
@@ -114,14 +115,14 @@ SELECT
 
     -- 1:many detail — typed ARRAY, cast before COALESCE (unchanged doctrine)
     , COALESCE(
-        PolicyMonthlyHistory.MonthlySnapshots::ARRAY(OBJECT(
+        PolicyMonthlyHistory.MonthlySnapshots::ARRAY (OBJECT(
             LoadYearMonthNum NUMBER
             , LineOfBusiness VARCHAR
             , InceptionDate DATE
             , CancellationDate DATE
             , PriorPolicy VARCHAR
         ))
-        , ARRAY_CONSTRUCT()::ARRAY(OBJECT(
+        , ARRAY_CONSTRUCT()::ARRAY (OBJECT(
             LoadYearMonthNum NUMBER
             , LineOfBusiness VARCHAR
             , InceptionDate DATE
