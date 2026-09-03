@@ -43,6 +43,12 @@ on:
       - ".sqlfluff"
       - "tools/**"
       - ".github/workflows/customer_journey_ci.yml"
+  # Manual run from the Actions tab — runs the 4 review gates (auto-fix,
+  # lint, column-contracts, compile) without touching Snowflake. Useful for
+  # validating a direct-to-main push (the compile gate is the only thing that
+  # would catch a broken ref() after the gitignored combiners/wide files are
+  # regenerated, and it's otherwise PR-only).
+  workflow_dispatch: {}
 
 # The auto-fix job (Job 0) pushes a commit back onto the PR branch. The
 # default GITHUB_TOKEN on a pull_request event is read-only unless the
