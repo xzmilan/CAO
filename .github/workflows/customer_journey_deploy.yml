@@ -16,14 +16,19 @@ name: CustomerJourney dbt Deploy
 # checks never depend on Snowflake secrets that may not be provisioned yet —
 # your PR can pass all the rules without IT having set anything up.
 #
-# CURRENT STATE (trial account, password auth): this deploys against
+# CURRENT STATE (trial account, key-pair auth): this deploys against
 # xzmilan's personal Snowflake trial account (RDCAAHU-BL07485), hardcoded
-# below as plain env values — no repo Variables needed. The only secret
-# required is SNOWFLAKE_PASSWORD (Settings > Secrets and variables > Actions
-# > Secrets tab). When Farmers IT provisions the real service account
-# (svc-cx-snfl-git, key-pair/SNOWFLAKE_JWT auth), swap the env: block back
-# to vars.SNOWFLAKE_* + SNOWFLAKE_PRIVATE_KEY/SNOWFLAKE_PRIVATE_KEY_PASSPHRASE
-# secrets and point at the Farmers account/role/warehouse/database.
+# below as plain env values — no repo Variables needed. Auth is key-pair
+# (SNOWFLAKE_JWT) via the SNOWFLAKE_PRIVATE_KEY repo secret — password auth
+# was tried first but this account has MFA/TOTP enforced, which rejects
+# password-only login from an unattended CI runner. Key-pair bypasses MFA
+# entirely (Snowflake's documented behavior for RSA key-pair auth) and is
+# also what real service accounts use, so this is the correct long-term
+# auth method, not just a workaround. The private key is UNENCRYPTED (no
+# passphrase) — SNOWFLAKE_PRIVATE_KEY_PASSPHRASE is intentionally omitted.
+# When Farmers IT provisions the real service account (svc-cx-snfl-git),
+# swap the env: block back to vars.SNOWFLAKE_* and point at the Farmers
+# account/role/warehouse/database, keeping the same key-pair auth shape.
 #
 # CRON NOTE: GitHub Actions schedule cron is ALWAYS UTC, never local time.
 # 7:00 AM ET = 12:00 UTC during EST (standard time). 
@@ -46,15 +51,15 @@ jobs:
     name: Deploy + Build to Snowflake
     runs-on: ubuntu-latest
     env:
-      # Hardcoded to xzmilan's personal trial account — password auth via
-      # the SNOWFLAKE_PASSWORD repo secret (the only Snowflake secret
-      # actually set on this repo today). No repo Variables needed.
+      # Hardcoded to xzmilan's personal trial account — key-pair auth via
+      # the SNOWFLAKE_PRIVATE_KEY repo secret. No repo Variables needed.
       SNOWFLAKE_ACCOUNT: RDCAAHU-BL07485
       SNOWFLAKE_USER: xzmilan
       SNOWFLAKE_ROLE: ACCOUNTADMIN
       SNOWFLAKE_WAREHOUSE: COMPUTE_WH
       SNOWFLAKE_DATABASE: MZ_SF
-      SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
+      SNOWFLAKE_AUTHENTICATOR: SNOWFLAKE_JWT
+      SNOWFLAKE_PRIVATE_KEY_RAW: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
