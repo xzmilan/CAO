@@ -10,6 +10,7 @@ SELECT
     , AVG(TRY_CAST(Response.value:NpsScore::VARCHAR AS NUMBER)) AS RenewalAvgNps
 FROM {{ ref('SurveyRaw') }} AS Survey
 CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Responses) AS Response
-WHERE Survey.SurveyType = 'RENEWAL'
-  AND Response.value:NpsScore IS NOT NULL
+WHERE
+    Survey.SurveyType = 'RENEWAL'
+    AND Response.value:NpsScore IS NOT NULL
 GROUP BY Survey.ID

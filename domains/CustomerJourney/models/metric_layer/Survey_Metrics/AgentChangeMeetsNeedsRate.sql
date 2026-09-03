@@ -10,6 +10,7 @@ SELECT
     , AVG(IFF(Response.value:AgentChangeDetails:MeetsNeedsFlag = '1', 1.0, 0.0)) AS AgentChangeMeetsNeedsRate
 FROM {{ ref('SurveyRaw') }} AS Survey
 CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Responses) AS Response
-WHERE Survey.SurveyType = 'AGENT_CHANGE'
-  AND Response.value:AgentChangeDetails:MeetsNeedsFlag IS NOT NULL
+WHERE
+    Survey.SurveyType = 'AGENT_CHANGE'
+    AND Response.value:AgentChangeDetails:MeetsNeedsFlag IS NOT NULL
 GROUP BY Survey.ID

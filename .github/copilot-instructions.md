@@ -286,6 +286,31 @@ The Wide Layer has exactly one job: assembly. If you put logic here, you've crea
 metric layer that nobody knows to audit, and you've broken the mechanical contract that makes
 the Wide Layer auto-generatable.
 
+### A new raw entity is NOT done until it has a Wide Layer file — no exceptions
+
+Every warehouse needs "join the raw entity to its metrics" solved somehow — BigQuery does it
+natively with a zero-maintenance STRUCT SELECT (no typed cast needed), Snowflake needs an
+explicit typed cast per metric, which is why a Snowflake domain's auto-assembly runs as TWO
+generator scripts instead of one. Whatever the warehouse, the rule is the same: **the moment a
+new `models/raw_layer/<Entity>/<Entity>Raw.sql` is added, the entity is NOT considered done
+until `models/wide_layer/<Entity>Wide.sql` also exists and is committed.** An entity with no
+wide table is unreachable by the View Layer — its raw data and metrics exist but nothing can
+consume them.
+
+For a domain using the Snowflake two-step generator pattern (see that domain's `tools/`
+folder — e.g. `generate_metrics_combiner.py` + `generate_wide_layer.py`), run both, in order,
+after adding the entity's first metric file:
+```
+python3 tools/generate_metrics_combiner.py --entity <Entity>
+python3 tools/generate_wide_layer.py --entity <Entity>
+```
+and commit both generated files. The CI `--check` mode on these scripts catches a forgotten
+regeneration on push/PR — but that only fires after the fact. A human adding a new entity must
+run the regeneration locally too; don't rely on CI to be the first time this gets caught.
+Re-run the same two commands every time a metric file is added, removed, or renamed for an
+existing entity — the wide table goes stale the moment the metric list changes, not just at
+entity creation.
+
 ---
 
 ## 5. VIEW LAYER RULES (TIER 4)
@@ -445,8 +470,13 @@ When a new domain is added, do NOT modify this file. Instead:
    (`raw_layer / metric_layer / wide_layer / view_layer`).
 2. Put domain-specific rules in that domain: source-system names, natural keys, grain decisions,
    BI-tool wiring, and a SQL-standards reference file if the domain has one.
-3. Add a `/domains/<NewDomain>/  @owner` entry to `CODEOWNERS`.
-4. Reference this file from the domain so the AI agent picks up both — the universal contract
+3. Every entity added under that domain's `raw_layer/` needs a matching `wide_layer/<Entity>Wide.sql`
+   before it's done — see Section 4's "A new raw entity is NOT done until it has a Wide Layer
+   file" rule. If the domain uses the Snowflake two-step generator pattern, its `tools/` folder
+   needs its own `generate_metrics_combiner.py` + `generate_wide_layer.py` (or equivalent) before
+   the first entity can be considered fully onboarded.
+4. Add a `/domains/<NewDomain>/  @owner` entry to `CODEOWNERS`.
+5. Reference this file from the domain so the AI agent picks up both — the universal contract
    (here) and the domain specifics (in the domain).
 
 The four-tier contract above does not change per domain. What changes is the source map, the
