@@ -1,13 +1,22 @@
 customer_journey:
   target: dev
   outputs:
+    # xzmilan personal Snowflake trial account — matches the env vars set
+    # in .github/workflows/customer_journey_deploy.yml (key-pair auth,
+    # SNOWFLAKE_JWT). This file is what `snow dbt deploy` validates before
+    # the --temporary-connection env vars take over at execute time, so it
+    # must resolve to a real account/role or the deploy step fails even
+    # though the actual connection uses the env vars. When Farmers IT
+    # provisions the real service account, swap this back to the Farmers
+    # account/role/warehouse/database.
     dev:
       type: snowflake
-      account: FARMERS-AWSUSEAST2
-      user: steven.passanante@contractor.farmersinsurance.com
-      authenticator: externalbrowser
-      database: PRD_BIZDB_PL_MARKETING
+      account: RDCAAHU-BL07485
+      user: xzmilan
+      authenticator: SNOWFLAKE_JWT
+      private_key_path: "{{ env_var('SNOWFLAKE_PRIVATE_KEY_PATH', '') }}"
+      database: MZ_SF
       schema: CUSTOMERJOURNEY
-      warehouse: PRD_IT_EBI_WH
-      role: "FARMERS OKTA SFLAKE_ WKSP_PL_MARKETING_RW"
+      warehouse: COMPUTE_WH
+      role: ACCOUNTADMIN
       threads: 8
