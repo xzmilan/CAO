@@ -9,7 +9,7 @@
 
 WITH MoveRetention AS (
     SELECT
-        ChangeEvent.ChangeEvent:Policy:ID::VARCHAR AS PolicyID
+        ChangeEvent.PolicyID
         , AVG(
             IsZipChangeEvent.IsZipChangeEvent
             * InForce90DaysAfterChangeFlag.InForce90DaysAfterChangeFlag)
@@ -20,7 +20,7 @@ WITH MoveRetention AS (
     JOIN {{ ref('InForce90DaysAfterChangeFlag') }} AS InForce90DaysAfterChangeFlag
         ON ChangeEvent.ID = InForce90DaysAfterChangeFlag.ID
     WHERE IsZipChangeEvent.IsZipChangeEvent = 1
-    GROUP BY ChangeEvent.ChangeEvent:Policy:ID::VARCHAR
+    GROUP BY ChangeEvent.PolicyID
 )
 
 SELECT

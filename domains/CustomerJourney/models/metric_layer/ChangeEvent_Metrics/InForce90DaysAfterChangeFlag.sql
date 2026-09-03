@@ -17,10 +17,10 @@ Is there a case when a ChangeEvent ID would not have a corresponding Policy.ID? 
 SELECT
     ChangeEvent.ID
     , IFF(
-        Policy.Policy:CancellationDate IS NULL
-        OR Policy.Policy:CancellationDate > DATEADD(DAY, 90, ChangeEvent.ChangeEvent:EffectiveDate)
+        Policy.CancellationDate IS NULL
+        OR Policy.CancellationDate > DATEADD(DAY, 90, ChangeEvent.EffectiveDate)
         , 1, 0
     ) AS InForce90DaysAfterChangeFlag
 FROM {{ ref('ChangeEventRaw') }} AS ChangeEvent
 LEFT JOIN {{ ref('PolicyRaw') }} AS Policy
-    ON ChangeEvent.ChangeEvent:Policy:ID = Policy.ID
+    ON ChangeEvent.PolicyID = Policy.ID

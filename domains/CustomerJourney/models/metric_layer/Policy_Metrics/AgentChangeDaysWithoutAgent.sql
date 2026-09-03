@@ -12,8 +12,8 @@ WITH AgentChangeSurveys AS (
         , AVG(value:AgentChangeDetails.DaysWithoutAgent::NUMBER) AS AvgDaysWithoutAgent
         , COUNT(value) AS SurveyResponseCount
     FROM {{ ref('SurveyRaw') }} AS Survey
-    CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Survey:Responses)
-    WHERE Survey.Survey:SurveyType = 'AGENT_CHANGE'
+    CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Responses)
+    WHERE Survey.SurveyType = 'AGENT_CHANGE'
     GROUP BY value:SystemIds.PolicyNumber::VARCHAR
 )
 
@@ -22,4 +22,4 @@ SELECT
     , AgentChangeSurveys.AvgDaysWithoutAgent AS AgentChangeDaysWithoutAgent
 FROM {{ ref('PolicyRaw') }} AS Policy
 LEFT JOIN AgentChangeSurveys
-    ON Policy.Policy:SystemIds.RtenPlcyCntrctNum = AgentChangeSurveys.PolicyNumber
+    ON Policy.SystemIds:RtenPlcyCntrctNum = AgentChangeSurveys.PolicyNumber

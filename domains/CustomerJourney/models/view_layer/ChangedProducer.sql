@@ -18,8 +18,8 @@ SELECT
     , Policy.Policy:PolicyStateCode AS PolicyStateCode
     , Policy.Policy:SourceSystemCode AS SourceSystemCode
     , Policy.Policy:AgentOfRecordNumber AS AgentOfRecordNumber
-    , Policy.NumberOfAgentChangeEvents:NumberOfAgentChangeEvents AS NumberOfAgentChangeEvents
-    , Policy.NumberOfAgentChangePoliciesInForce90Days:NumberOfAgentChangePoliciesInForce90Days AS NumberOfAgentChangePoliciesInForce90Days
-    , Policy.AgentChangeRetentionRate90Days:AgentChangeRetentionRate90Days AS AgentChangeRetentionRate90Days
+    , Policy.PolicyMetrics:NumberOfAgentChangeEvents AS NumberOfAgentChangeEvents
+    , Policy.PolicyMetrics:NumberOfAgentChangePoliciesInForce90Days AS NumberOfAgentChangePoliciesInForce90Days
+    , Policy.PolicyMetrics:AgentChangeRetentionRate90Days AS AgentChangeRetentionRate90Days
 FROM {{ ref('PolicyWide') }} AS Policy
-WHERE Policy.NumberOfAgentChangeEvents:NumberOfAgentChangeEvents > 0
+WHERE Policy.PolicyMetrics:NumberOfAgentChangeEvents > 0

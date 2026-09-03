@@ -57,21 +57,25 @@ sources:
               declared_because: "usage_rule"
           - name: MEET_NEEDS
             description: |
-              "Does the new agent meet your needs?" Y/N — one of the specific
-              Agency Change journey metrics.
+              "Does the new agent meet your needs?" CODED '1'=Yes / '2'=No
+              (NOT Y/N). Codebook inferred 2026-09-02: all 447 MEET_NEEDS_TEXT
+              open-text complaints sit under '2'; '1' has zero text.
             meta:
               declared_because: "usage_rule"
           - name: RCVD_FARMERS_LETTER
             description: |
-              "Did you receive a letter from Farmers about the change?" Y/N —
-              feeds the "% customers receiving no comms" metric (invert it).
+              "Did you receive a letter from Farmers about the change?"
+              CODED '1'=Received / '2','3'=Did not (NOT 0/1). Codebook inferred
+              2026-09-02: only '1' rows carry LETTER_EFFECTIVENESS (1-5
+              follow-up), '2'/'3' are NULL there. "% no comms" = '2' (or '2'+'3').
             meta:
               declared_because: "usage_rule"
           - name: NUM_DAYS_NO_AGENT
             description: |
               Days the customer was without an agent during the transition.
-              This is the "avg cycle time for getting policies re-assigned"
-              metric the Agency Change journey asks for.
+              ⚠ 100% NULL in current feed (0 of 19,589 rows) — the
+              days-without-agent metric returns no rows until Qualtrics
+              collects/loads this field. Source-feed gap, not a SQL issue.
             meta:
               declared_because: "usage_rule"
 
@@ -139,11 +143,19 @@ sources:
             tests:
               - not_null
               - unique
-          - name: POLICY_NUMBER_1
+          - name: POLICY
             description: |
-              Policy number — the join key to PolicyRaw.
+              Policy number — the join key to PolicyRaw (⚠ NOT POLICY_NUMBER_1
+              like the other tables; this table uses a bare POLICY column).
+              Sparse — populated on ~50K of 529K rows.
             meta:
               declared_because: "join_key"
+          - name: INVITE_PULL_DATE
+            description: |
+              When the invite was pulled — the wave anchor for rNPS campaigns
+              (this table has no separate invite feed). Populated ~496K rows.
+            meta:
+              declared_because: "usage_rule"
           - name: Q1
             description: |
               The NPS question (0-10 scale) — relationship NPS.

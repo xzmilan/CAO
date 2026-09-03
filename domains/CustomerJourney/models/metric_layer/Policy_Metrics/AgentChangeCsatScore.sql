@@ -12,8 +12,8 @@ WITH AgentChangeSurveys AS (
         , AVG(SurveyResponse.value:NpsScore::NUMBER) AS AvgNpsScore
         , COUNT(*) AS SurveyResponseCount
     FROM {{ ref('SurveyRaw') }} AS Survey
-    CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Survey:Responses) AS SurveyResponse
-    WHERE Survey.Survey:SurveyType = 'AGENT_CHANGE'
+    CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Responses) AS SurveyResponse
+    WHERE Survey.SurveyType = 'AGENT_CHANGE'
     GROUP BY SurveyResponse.value:SystemIds.PolicyNumber::VARCHAR
 )
 
@@ -22,4 +22,4 @@ SELECT
     , AgentChangeSurveys.AvgNpsScore AS AgentChangeCsatScore
 FROM {{ ref('PolicyRaw') }} AS Policy
 LEFT JOIN AgentChangeSurveys
-    ON Policy.Policy:SystemIds.RtenPlcyCntrctNum = AgentChangeSurveys.PolicyNumber
+    ON Policy.SystemIds:RtenPlcyCntrctNum = AgentChangeSurveys.PolicyNumber

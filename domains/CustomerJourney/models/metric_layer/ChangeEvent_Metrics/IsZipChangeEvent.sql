@@ -9,7 +9,7 @@
 SELECT
     ChangeEvent.ID
     , CASE
-        WHEN ChangeEvent.ChangeEvent:EventType = 'ZIP_CHANGE' THEN 1
+        WHEN ChangeEvent.EventType = 'ZIP_CHANGE' THEN 1
         ELSE 0
     END AS IsZipChangeEvent
 FROM {{ ref('ChangeEventRaw') }} AS ChangeEvent

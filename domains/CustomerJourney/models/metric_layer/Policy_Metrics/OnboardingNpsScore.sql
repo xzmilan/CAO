@@ -12,8 +12,8 @@ WITH OnboardingSurveys AS (
         , AVG(SurveyResponse.value:NpsScore::NUMBER) AS AvgNpsScore
         , COUNT(*) AS SurveyResponseCount
     FROM {{ ref('SurveyRaw') }} AS Survey
-    CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Survey:Responses) AS SurveyResponse
-    WHERE Survey.Survey:SurveyType = 'NEW_BUSINESS'
+    CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Responses) AS SurveyResponse
+    WHERE Survey.SurveyType = 'NEW_BUSINESS'
     GROUP BY SurveyResponse.value:SystemIds.PolicyNumber::VARCHAR
 )
 
@@ -22,4 +22,4 @@ SELECT
     , OnboardingSurveys.AvgNpsScore AS OnboardingNpsScore
 FROM {{ ref('PolicyRaw') }} AS Policy
 LEFT JOIN OnboardingSurveys
-    ON Policy.Policy:SystemIds.RtenPlcyCntrctNum = OnboardingSurveys.PolicyNumber
+    ON Policy.SystemIds:RtenPlcyCntrctNum = OnboardingSurveys.PolicyNumber

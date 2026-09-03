@@ -13,6 +13,6 @@ SELECT
     , Survey.Survey:InvitesSent AS InvitesSent
     , Survey.Survey:ResponseCount AS ResponseCount
     , Survey.Survey:ResponseRate AS ResponseRate
-    , Survey.RenewalAvgNps:RenewalAvgNps AS RenewalAvgNps
+    , Survey.SurveyMetrics:RenewalAvgNps AS RenewalAvgNps
 FROM {{ ref('SurveyWide') }} AS Survey
 WHERE Survey.Survey:SurveyType = 'RENEWAL'

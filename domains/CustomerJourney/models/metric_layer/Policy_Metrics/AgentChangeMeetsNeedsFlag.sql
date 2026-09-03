@@ -11,15 +11,15 @@ WITH AgentChangeSurveys AS (
         value:SystemIds.PolicyNumber::VARCHAR AS PolicyNumber
         , MAX(
             CASE
-                WHEN UPPER(value:AgentChangeDetails.MeetsNeedsFlag::VARCHAR) = 'Y' THEN 1
-                WHEN UPPER(value:AgentChangeDetails.MeetsNeedsFlag::VARCHAR) = 'N' THEN 0
+                WHEN UPPER(value:AgentChangeDetails.MeetsNeedsFlag::VARCHAR) = '1' THEN 1
+                WHEN UPPER(value:AgentChangeDetails.MeetsNeedsFlag::VARCHAR) = '2' THEN 0
                 ELSE NULL
             END
         ) AS MeetsNeedsFlag
         , COUNT(value) AS SurveyResponseCount
     FROM {{ ref('SurveyRaw') }} AS Survey
-    CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Survey:Responses)
-    WHERE Survey.Survey:SurveyType = 'AGENT_CHANGE'
+    CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Responses)
+    WHERE Survey.SurveyType = 'AGENT_CHANGE'
     GROUP BY value:SystemIds.PolicyNumber::VARCHAR
 )
 
@@ -28,4 +28,4 @@ SELECT
     , AgentChangeSurveys.MeetsNeedsFlag AS AgentChangeMeetsNeedsFlag
 FROM {{ ref('PolicyRaw') }} AS Policy
 LEFT JOIN AgentChangeSurveys
-    ON Policy.Policy:SystemIds.RtenPlcyCntrctNum = AgentChangeSurveys.PolicyNumber
+    ON Policy.SystemIds:RtenPlcyCntrctNum = AgentChangeSurveys.PolicyNumber

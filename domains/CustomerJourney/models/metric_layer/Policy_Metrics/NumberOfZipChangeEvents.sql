@@ -7,12 +7,12 @@
 
 WITH ZipChangeCounts AS (
     SELECT
-        ChangeEvent.ChangeEvent:Policy:ID::VARCHAR AS PolicyID
+        ChangeEvent.PolicyID
         , SUM(IsZipChangeEvent.IsZipChangeEvent) AS NumberOfZipChangeEvents
     FROM {{ ref('ChangeEventRaw') }} AS ChangeEvent
     JOIN {{ ref('IsZipChangeEvent') }} AS IsZipChangeEvent
         ON ChangeEvent.ID = IsZipChangeEvent.ID
-    GROUP BY ChangeEvent.ChangeEvent:Policy:ID::VARCHAR
+    GROUP BY ChangeEvent.PolicyID
 )
 
 SELECT

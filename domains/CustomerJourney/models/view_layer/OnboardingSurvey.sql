@@ -13,6 +13,6 @@ SELECT
     , Survey.Survey:InvitesSent AS InvitesSent
     , Survey.Survey:ResponseCount AS ResponseCount
     , Survey.Survey:ResponseRate AS ResponseRate
-    , Survey.NewBusinessAvgNps:NewBusinessAvgNps AS NewBusinessAvgNps
+    , Survey.SurveyMetrics:NewBusinessAvgNps AS NewBusinessAvgNps
 FROM {{ ref('SurveyWide') }} AS Survey
 WHERE Survey.Survey:SurveyType = 'NEW_BUSINESS'

@@ -4,10 +4,6 @@ config-version: 2
 profile: customer_journey
 
 model-paths: ["models"]
-seed-paths: ["seeds"]
-
-seeds:
-  customer_journey: {}
 
 models:
   customer_journey:

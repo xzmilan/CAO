@@ -9,7 +9,7 @@ name: CustomerJourney dbt Deploy
 # (PolicyRaw/ChangeEventRaw/SurveyRaw), triggering a full deploy pipeline on
 # every merge means paying Snowflake warehouse spin-up/MERGE overhead
 # per-merge instead of once per day for the same eventual freshness. A
-# manual `workflow_dispatch` trigger stays available for on-demand runs
+# manual `workflow_dispatch` trigger is available for on-demand runs
 # (e.g. testing a change immediately rather than waiting for the schedule).
 #
 # It's separate from the PR-gating workflow (customer_journey_ci.yml) so PR
@@ -17,13 +17,12 @@ name: CustomerJourney dbt Deploy
 # your PR can pass all the rules without IT having set anything up.
 #
 # It needs a Snowflake SERVICE ACCOUNT (not a personal account), supplied
-# via GitHub Secrets/Variables. See the CAO README for setup steps.
+# via GitHub Secrets/Variables. Service Account svc-cx-snfl-git provisioned
+# See the CAO README for setup steps or for changes. 
 #
-# Connection details come from a Snowflake SERVICE ACCOUNT supplied via
-# GitHub Secrets/Variables (not hardcoded). Set SNOWFLAKE_ACCOUNT, _USER,
+# Connection details come from the service account. Set SNOWFLAKE_ACCOUNT, _USER,
 # _ROLE, _WAREHOUSE, and _DATABASE as repo Variables (Settings > Secrets and
-# variables > Actions > Variables tab), and SNOWFLAKE_PRIVATE_KEY as a repo
-# Secret (same page, Secrets tab), before enabling this workflow.
+# variables > Actions > Variables tab), and SNOWFLAKE_PRIVATE_KEY + SNOWFLAKE_PRIVATE_KEY_PASSPHRASE 
 #
 # AUTH METHOD: key-pair (SNOWFLAKE_JWT), not password/SSO. The service
 # account's public key is registered on the Snowflake user via
@@ -33,20 +32,19 @@ name: CustomerJourney dbt Deploy
 # --temporary-connection mode reads automatically alongside the other
 # SNOWFLAKE_* generic env vars. No file is written to disk.
 #
-# If the .p8 key was generated with a passphrase (encrypted private key),
+# Key was generated with a passphrase (it is the service account password found in PAR)
+# by SnowFlake team. (AIS DB2 group, INC24167623).
 # also set a SNOWFLAKE_PRIVATE_KEY_PASSPHRASE repo Secret — the Snowflake
 # connector reads it from the PRIVATE_KEY_PASSPHRASE env var below. If the
 # key has NO passphrase, leave that secret unset; the env var will resolve
 # to an empty string, which the connector treats as "no passphrase."
 #
 # CRON NOTE: GitHub Actions schedule cron is ALWAYS UTC, never local time.
-# 7:00 AM ET = 12:00 UTC during EST (standard time, ~early Nov–early Mar)
-# but 11:00 UTC during EDT (daylight time, ~mid-Mar–early Nov). GitHub
+# 7:00 AM ET = 12:00 UTC during EST (standard time). 
 # Actions does not auto-adjust for DST. Cron below is pinned to 12:00 UTC
-# (true 7am during EST). During EDT months the actual run lands ~8am ET,
-# one hour later than intended, until this is manually flipped to 11:00 UTC
-# for daylight months (or replaced with a DST-aware external scheduler).
+# (true 7am during EST).
 # Flag this on the calendar or it will drift silently every March/November.
+# Need to monitor table update schedule and adjust cron if necessary.
 
 on:
   schedule:

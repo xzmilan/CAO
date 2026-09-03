@@ -10,5 +10,5 @@ SELECT
     Policy.ID
     , MAX(PolicyMonthly.value:"LoadYearMonthNum")::VARCHAR AS LoadMonth
 FROM {{ ref('PolicyRaw') }} AS Policy
-CROSS JOIN LATERAL FLATTEN(INPUT => Policy.Policy:MonthlySnapshots) AS PolicyMonthly
+CROSS JOIN LATERAL FLATTEN(INPUT => Policy.MonthlySnapshots) AS PolicyMonthly
 GROUP BY Policy.ID

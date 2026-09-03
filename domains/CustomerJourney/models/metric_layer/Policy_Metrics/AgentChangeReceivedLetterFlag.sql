@@ -9,17 +9,19 @@
 WITH AgentChangeSurveys AS (
     SELECT
         value:SystemIds.PolicyNumber::VARCHAR AS PolicyNumber
+        -- Note: RCVD_FARMERS_LETTER stores '1'/'2'/'3', not 'Y'/'N'.
+        -- Assumed '1' = received, '2'/'3' = did not. CONFIRM Qualtrics codebook.
         , MAX(
             CASE
-                WHEN UPPER(value:AgentChangeDetails.ReceivedLetterFlag::VARCHAR) = 'Y' THEN 1
-                WHEN UPPER(value:AgentChangeDetails.ReceivedLetterFlag::VARCHAR) = 'N' THEN 0
+                WHEN UPPER(value:AgentChangeDetails.ReceivedLetterFlag::VARCHAR) = '1' THEN 1
+                WHEN UPPER(value:AgentChangeDetails.ReceivedLetterFlag::VARCHAR) IN ('2', '3') THEN 0
                 ELSE NULL
             END
         ) AS ReceivedLetterFlag
         , COUNT(value) AS SurveyResponseCount
     FROM {{ ref('SurveyRaw') }} AS Survey
-    CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Survey:Responses)
-    WHERE Survey.Survey:SurveyType = 'AGENT_CHANGE'
+    CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Responses)
+    WHERE Survey.SurveyType = 'AGENT_CHANGE'
     GROUP BY value:SystemIds.PolicyNumber::VARCHAR
 )
 

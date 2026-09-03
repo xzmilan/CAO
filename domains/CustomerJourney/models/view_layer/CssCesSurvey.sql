@@ -13,6 +13,6 @@ SELECT
     , Survey.Survey:InvitesSent AS InvitesSent
     , Survey.Survey:ResponseCount AS ResponseCount
     , Survey.Survey:ResponseRate AS ResponseRate
-    , Survey.CssCesAvgScore:CssCesAvgScore AS CssCesAvgScore
+    , Survey.SurveyMetrics:CssCesAvgScore AS CssCesAvgScore
 FROM {{ ref('SurveyWide') }} AS Survey
 WHERE Survey.Survey:SurveyType = 'CSS_CES'

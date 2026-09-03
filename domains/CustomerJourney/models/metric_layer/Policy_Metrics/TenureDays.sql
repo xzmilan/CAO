@@ -7,5 +7,5 @@
 
 SELECT
     Policy.ID
-    , DATEDIFF('day', Policy.Policy:PolicyInceptionDate, CURRENT_DATE()) AS TenureDays
+    , DATEDIFF('day', Policy.PolicyInceptionDate, CURRENT_DATE()) AS TenureDays
 FROM {{ ref('PolicyRaw') }} AS Policy

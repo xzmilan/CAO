@@ -1,10 +1,12 @@
 -- RAW ENTITY: Contact
 -- Grain: one row per contact identity (APEX contact)
 -- ID: hashed primary key — BASE64_ENCODE(SHA2(ApexContactId, 256))
--- Doctrine: identity grain is FIRST-CLASS. Individual contact events are
---           nested as a typed ARRAY of OBJECTs — consumers FLATTEN when
---           they need event grain. System IDs in typed OBJECTs, never bare.
---           Semantic links carry ONLY the hashed ID (hash-only doctrine).
+-- Doctrine: identity grain is FIRST-CLASS. 1:1 identity/address attributes
+--           are flat top-level columns — no wrapping "Contact" OBJECT.
+--           Individual contact events stay nested as a typed ARRAY of
+--           OBJECTs — consumers FLATTEN when they need event grain.
+--           System IDs in typed OBJECTs, never bare. Semantic links carry
+--           ONLY the hashed ID (hash-only doctrine).
 --           THIS ENTITY IS THE CONTRACT for all contact data.
 --           NEVER reads the STG_APEX view (1.76B-row dedup trap) — reads
 --           PRD_BRNZ_APEX.CONTACT directly.
@@ -125,27 +127,49 @@ WITH ApexContacts AS (
 )
 
 SELECT
-    BASE64_ENCODE(SHA2(ApexContacts.ApexContactId, 256)) AS ID
+    -- 1:1 identity/address attributes — flat top-level columns, no
+    -- wrapping OBJECT.
+    , ApexContacts.ContactName AS ContactName
+    , ApexContacts.PreferredEmail AS PreferredEmail
+    , ApexContacts.PreferredPhone AS PreferredPhone
+    , ApexContacts.PreferredPhoneType AS PreferredPhoneType
+    , ApexContacts.MailingStreet AS MailingStreet
+    , ApexContacts.MailingCity AS MailingCity
+    , ApexContacts.MailingState AS MailingState
+    , ApexContacts.MailingZip AS MailingZip
 
+    -- 1:many detail — typed ARRAY, cast before COALESCE.
+    , COALESCE(
+        ContactEventsByContact.ContactEvents::ARRAY(OBJECT(
+            ContactEventId VARCHAR
+            , ContactChannel VARCHAR
+            , ContactTimestamp TIMESTAMP_NTZ
+            , ContactAttempts NUMBER
+            , TotalCallDurationSeconds NUMBER
+            , IsQualifiedContact BOOLEAN
+            , IsQuoteDiscussed BOOLEAN
+            , ContactSources OBJECT(ContactSpace VARCHAR, Livevox VARCHAR, Drips VARCHAR, Sfmc VARCHAR, EaJourney VARCHAR, DbuJourney VARCHAR)
+        ))
+        , ARRAY_CONSTRUCT()::ARRAY(OBJECT(
+            ContactEventId VARCHAR
+            , ContactChannel VARCHAR
+            , ContactTimestamp TIMESTAMP_NTZ
+            , ContactAttempts NUMBER
+            , TotalCallDurationSeconds NUMBER
+            , IsQualifiedContact BOOLEAN
+            , IsQuoteDiscussed BOOLEAN
+            , ContactSources OBJECT(ContactSpace VARCHAR, Livevox VARCHAR, Drips VARCHAR, Sfmc VARCHAR, EaJourney VARCHAR, DbuJourney VARCHAR)
+        ))
+    ) AS ContactEvents
+
+    -- System IDs — quarantined in a typed OBJECT, never bare.
     , OBJECT_CONSTRUCT_KEEP_NULL(
-        'Identity', OBJECT_CONSTRUCT_KEEP_NULL(
-            'ApexContactId', ApexContacts.ApexContactId
-            , 'ApexAccountId', ApexContacts.ApexAccountId
-            , 'ContactName', ApexContacts.ContactName
-            , 'PreferredEmail', ApexContacts.PreferredEmail
-            , 'PreferredPhone', ApexContacts.PreferredPhone
-            , 'PreferredPhoneType', ApexContacts.PreferredPhoneType
-        )
-        , 'MailingAddress', OBJECT_CONSTRUCT_KEEP_NULL(
-            'Street', ApexContacts.MailingStreet
-            , 'City', ApexContacts.MailingCity
-            , 'State', ApexContacts.MailingState
-            , 'Zip', ApexContacts.MailingZip
-        )
-        , 'ContactEvents', COALESCE(ContactEventsByContact.ContactEvents, ARRAY_CONSTRUCT())
-        , 'SystemIds', OBJECT_CONSTRUCT_KEEP_NULL(
-            'ApexContactId', ApexContacts.ApexContactId
-            , 'ApexAccountId', ApexContacts.ApexAccountId
+        'ApexContactId', ApexContacts.ApexContactId
+        , 'ApexAccountId', ApexContacts.ApexAccountId
+    )::OBJECT(
+        ApexContactId VARCHAR
+        , ApexAccountId VARCHAR
+    ) AS SystemIdspexAccountId', ApexContacts.ApexAccountId
         )
     ) AS Contact
 FROM ApexContacts

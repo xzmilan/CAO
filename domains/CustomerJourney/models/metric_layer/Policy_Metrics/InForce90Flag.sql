@@ -9,8 +9,8 @@ SELECT
     Policy.ID
     , CASE
         WHEN
-            Policy.Policy:CancellationDate IS NULL
-            OR DATEDIFF('day', Policy.Policy:PolicyInceptionDate, Policy.Policy:CancellationDate) > 90
+            Policy.CancellationDate IS NULL
+            OR DATEDIFF('day', Policy.PolicyInceptionDate, Policy.CancellationDate) > 90
             THEN 1
         ELSE 0
     END AS InForce90Flag

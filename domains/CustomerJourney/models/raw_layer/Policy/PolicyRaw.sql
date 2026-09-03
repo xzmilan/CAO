@@ -6,9 +6,13 @@
 --   contract numbers — multi-line policies emit one row per LOB). Adding
 --   LOB_TYP_CD alone is already 1:1 with the row count; BUS_ENTITY is folded
 --   in for self-documenting keys (LOB codes recur across FARMERS/FWS/SPECIALTY).
--- Doctrine: 1:1 enrichment at top level; 1:many detail as typed ARRAYs;
---           system IDs in typed system-specific OBJECTs, never bare;
---           nothing downstream reads the transaction or snapshot tables.
+-- Doctrine  1:1 business attributes are FLAT
+--           TOP-LEVEL COLUMNS — no wrapping "Policy" OBJECT. System IDs
+--           stay in a typed SystemIds OBJECT (never bare). 1:many detail
+--           stays a typed ARRAY. This is what lets the Wide Layer use the
+--           Snowflake OBJECT_CONSTRUCT(alias.*) qualified-wildcard pattern
+--           instead of hand-built per-metric ::OBJECT(...) casts.
+--           Nothing downstream reads the transaction or snapshot tables.
 --           Change events live in ChangeEventRaw (event grain), NOT here.
 --           THIS ENTITY IS THE CONTRACT.
 
@@ -22,7 +26,7 @@ WITH LatestTransaction AS (
     FROM {{ source('rten', 'rten_dim_pl_trn_xlob') }} AS PolicyTransaction
     {% if is_incremental() %}
     WHERE PolicyTransaction.SRC_TRANS_TMSP > (
-        SELECT COALESCE(MAX(PolicyRawPrev.Policy:SystemIds:LastTransactionTmsp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
+        SELECT COALESCE(MAX(PolicyRawPrev.SystemIds:LastTransactionTmsp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
         FROM {{ this }} AS PolicyRawPrev
     )
     {% endif %}
@@ -52,7 +56,7 @@ WITH LatestTransaction AS (
         SELECT DISTINCT PolicyStatsNew.PLCY_NUM
         FROM {{ source('fdr', 'fdr_mdm_plcy_stats') }} AS PolicyStatsNew
         WHERE PolicyStatsNew.SRC_TRANS_TMSP > (
-            SELECT COALESCE(MAX(PolicyRawPrev.Policy:SystemIds:LastPolicyStatsTmsp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
+            SELECT COALESCE(MAX(PolicyRawPrev.SystemIds:LastPolicyStatsTmsp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
             FROM {{ this }} AS PolicyRawPrev
         )
     )
@@ -82,46 +86,49 @@ WITH LatestTransaction AS (
 SELECT
     BASE64_ENCODE(SHA2(CONCAT_WS('|', Policy.PLCY_CNTRCT_NUM, Policy.BUS_ENTITY, Policy.LOB_TYP_CD), 256)) AS ID
 
-    -- Typed-OBJECT entity: one outer ::OBJECT cast, inner values untyped.
-    -- Nested OBJECT_CONSTRUCT_KEEP_NULL stays untyped per the proven pattern.
-    -- Access: Policy:BusinessEntity  (typed → no ::VARCHAR cast needed).
+    -- 1:1 business attributes — flat top-level columns, no wrapping OBJECT.
+    , Policy.BUS_ENTITY AS BusinessEntity
+    , Policy.LOB_TYP_CD AS LineOfBusinessCode
+    , Policy.PLCY_ST_CD AS PolicyStateCode
+    , CAST(Policy.PLCY_CNTRCT_NUM AS VARCHAR) AS PolicyNumber
+    , Policy.SRVD_CHNL_CD AS ServiceChannelCode
+    , Policy.AGT_OF_RECRD_NUM AS AgentOfRecordNumber
+    , CAST(Policy.PLCY_INCEPT_DT AS DATE) AS PolicyInceptionDate
+    , CAST(Policy.CNCL_DT AS DATE) AS CancellationDate
+    , PolicyStats.PRIOR_PLCY AS PriorPolicyIndicator
+    , COALESCE(LatestTransaction.SourceSystemCode, PolicyStats.SRC_SYS) AS SourceSystemCode
+    , LatestTransaction.ZipCode AS ZipCode
+
+    -- System IDs — quarantined in a typed OBJECT, never bare (unchanged doctrine)
     , OBJECT_CONSTRUCT_KEEP_NULL(
-        'BusinessEntity', Policy.BUS_ENTITY
-        , 'LineOfBusinessCode', Policy.LOB_TYP_CD
-        , 'PolicyStateCode', Policy.PLCY_ST_CD
-        , 'PolicyNumber', CAST(Policy.PLCY_CNTRCT_NUM AS VARCHAR)
-        , 'ServiceChannelCode', Policy.SRVD_CHNL_CD
-        , 'AgentOfRecordNumber', Policy.AGT_OF_RECRD_NUM
-        , 'PolicyInceptionDate', CAST(Policy.PLCY_INCEPT_DT AS DATE)
-        , 'CancellationDate', CAST(Policy.CNCL_DT AS DATE)
-        , 'PriorPolicyIndicator', PolicyStats.PRIOR_PLCY
-        , 'SourceSystemCode', COALESCE(LatestTransaction.SourceSystemCode, PolicyStats.SRC_SYS)
-        , 'ZipCode', LatestTransaction.ZipCode
-        , 'SystemIds', OBJECT_CONSTRUCT_KEEP_NULL(
-            'RtenPlcyCntrctNum', CAST(Policy.PLCY_CNTRCT_NUM AS VARCHAR)
-            , 'FdrPlcyNum', CAST(PolicyStats.PLCY_NUM AS VARCHAR)
-            , 'LastTransactionTmsp', CAST(LatestTransaction.LatestTransactionTimestamp AS VARCHAR)
-            , 'LastPolicyStatsTmsp', CAST(PolicyStats.SRC_TRANS_TMSP AS VARCHAR)
-        )
-        , 'MonthlySnapshots', COALESCE(
-            PolicyMonthlyHistory.MonthlySnapshots
-            , ARRAY_CONSTRUCT()
-        )
+        'RtenPlcyCntrctNum', CAST(Policy.PLCY_CNTRCT_NUM AS VARCHAR)
+        , 'FdrPlcyNum', CAST(PolicyStats.PLCY_NUM AS VARCHAR)
+        , 'LastTransactionTmsp', CAST(LatestTransaction.LatestTransactionTimestamp AS VARCHAR)
+        , 'LastPolicyStatsTmsp', CAST(PolicyStats.SRC_TRANS_TMSP AS VARCHAR)
     )::OBJECT(
-        BusinessEntity        VARCHAR
-        , LineOfBusinessCode    VARCHAR
-        , PolicyStateCode       VARCHAR
-        , PolicyNumber          VARCHAR
-        , ServiceChannelCode    VARCHAR
-        , AgentOfRecordNumber   VARCHAR
-        , PolicyInceptionDate   DATE
-        , CancellationDate      DATE
-        , PriorPolicyIndicator  VARCHAR
-        , SourceSystemCode      VARCHAR
-        , ZipCode               VARCHAR
-        , SystemIds             OBJECT(RtenPlcyCntrctNum VARCHAR, FdrPlcyNum VARCHAR, LastTransactionTmsp VARCHAR, LastPolicyStatsTmsp VARCHAR)
-        , MonthlySnapshots      ARRAY(OBJECT(LoadYearMonthNum NUMBER, LineOfBusiness VARCHAR, InceptionDate DATE, CancellationDate DATE, PriorPolicy VARCHAR))
-      ) AS Policy
+        RtenPlcyCntrctNum VARCHAR
+        , FdrPlcyNum VARCHAR
+        , LastTransactionTmsp VARCHAR
+        , LastPolicyStatsTmsp VARCHAR
+    ) AS SystemIds
+
+    -- 1:many detail — typed ARRAY, cast before COALESCE (unchanged doctrine)
+    , COALESCE(
+        PolicyMonthlyHistory.MonthlySnapshots::ARRAY(OBJECT(
+            LoadYearMonthNum NUMBER
+            , LineOfBusiness VARCHAR
+            , InceptionDate DATE
+            , CancellationDate DATE
+            , PriorPolicy VARCHAR
+        ))
+        , ARRAY_CONSTRUCT()::ARRAY(OBJECT(
+            LoadYearMonthNum NUMBER
+            , LineOfBusiness VARCHAR
+            , InceptionDate DATE
+            , CancellationDate DATE
+            , PriorPolicy VARCHAR
+        ))
+    ) AS MonthlySnapshots
 
 FROM {{ source('rten', 'rten_xcmpy_pif_tbl') }} AS Policy
 LEFT JOIN CurrentPolicyStats AS PolicyStats

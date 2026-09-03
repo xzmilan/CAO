@@ -8,7 +8,7 @@
 
 WITH AgentChangeInForce AS (
     SELECT
-        ChangeEvent.ChangeEvent:Policy:ID::VARCHAR AS PolicyID
+        ChangeEvent.PolicyID
         , SUM(
             IsAgentChangeEvent.IsAgentChangeEvent
             * InForce90DaysAfterChangeFlag.InForce90DaysAfterChangeFlag)
@@ -18,7 +18,7 @@ WITH AgentChangeInForce AS (
         ON ChangeEvent.ID = IsAgentChangeEvent.ID
     JOIN {{ ref('InForce90DaysAfterChangeFlag') }} AS InForce90DaysAfterChangeFlag
         ON ChangeEvent.ID = InForce90DaysAfterChangeFlag.ID
-    GROUP BY ChangeEvent.ChangeEvent:Policy:ID::VARCHAR
+    GROUP BY ChangeEvent.PolicyID
 )
 
 SELECT

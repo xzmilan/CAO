@@ -7,5 +7,5 @@
 
 SELECT
     Policy.ID
-    , TO_CHAR(Policy.Policy:PolicyInceptionDate, 'YYYY-MM') AS InceptionMonth
+    , TO_CHAR(Policy.PolicyInceptionDate, 'YYYY-MM') AS InceptionMonth
 FROM {{ ref('PolicyRaw') }} AS Policy

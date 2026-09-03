@@ -2,11 +2,13 @@
 -- Grain: one row per policy change event (ZIP_CHANGE or AGENT_CHANGE)
 -- ID: hashed primary key — BASE64_ENCODE(SHA2(natural key, 256))
 -- Natural key: PLCY_CNTRCT_NUM + EventType + EFF_DT + SRC_TRANS_TMSP
--- Doctrine: event grain is FIRST-CLASS here. Policy context is denormalized
---           1:1 at build time (legal: still 1 row per event). Downstream
---           consumers NEVER FLATTEN and NEVER read the transaction table.
---           Raw source columns stay unformatted inside system-specific
---           OBJECTs — no aliases, no transforms, values as-is.
+-- Doctrine: event grain is FIRST-CLASS here. 1:1 event attributes are flat
+--           top-level columns — no wrapping "ChangeEvent" OBJECT. Policy
+--           context is denormalized 1:1 at build time as a flat PolicyID
+--           column (legal: still 1 row per event). Downstream consumers
+--           NEVER FLATTEN and NEVER read the transaction table. Raw source
+--           columns stay unformatted inside the system-specific Rten
+--           OBJECT — no aliases, no transforms, values as-is.
 --           THIS ENTITY IS THE CONTRACT for all change-event data.
 
 WITH RankedTransactions AS (
@@ -32,7 +34,7 @@ WITH RankedTransactions AS (
         SELECT DISTINCT PolicyTransactionNew.PLCY_CNTRCT_NUM
         FROM {{ source('rten', 'rten_dim_pl_trn_xlob') }} AS PolicyTransactionNew
         WHERE PolicyTransactionNew.SRC_TRANS_TMSP > (
-            SELECT COALESCE(MAX(ChangeEventRawPrev.ChangeEvent:SourceTransactionTimestamp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
+            SELECT COALESCE(MAX(ChangeEventRawPrev.SourceTransactionTimestamp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
             FROM {{ this }} AS ChangeEventRawPrev
         )
         UNION
@@ -42,7 +44,7 @@ WITH RankedTransactions AS (
         SELECT DISTINCT PolicyTransactionAny.PLCY_CNTRCT_NUM
         FROM {{ source('rten', 'rten_dim_pl_trn_xlob') }} AS PolicyTransactionAny
         WHERE PolicyTransactionAny.PLCY_CNTRCT_NUM NOT IN (
-            SELECT DISTINCT ChangeEventRawExisting.ChangeEvent:Rten:PLCY_CNTRCT_NUM::VARCHAR
+            SELECT DISTINCT ChangeEventRawExisting.Rten:PLCY_CNTRCT_NUM::VARCHAR
             FROM {{ this }} AS ChangeEventRawExisting
         )
     )
@@ -133,46 +135,40 @@ SELECT
         , 256
     )) AS ID
 
-    -- Typed-OBJECT entity: one outer ::OBJECT cast, inner values untyped.
-    -- Nested OBJECT_CONSTRUCT_KEEP_NULL stays untyped per the proven pattern.
-    -- Access: ChangeEvent:EventType  (typed → no ::VARCHAR cast needed).
+    -- 1:1 event attributes — flat top-level columns, no wrapping OBJECT.
+    , AllEvents.EventType AS EventType
+    , CAST(AllEvents.EffectiveDate AS DATE) AS EffectiveDate
+    , TO_CHAR(AllEvents.EffectiveDate, 'YYYY-MM') AS EventMonth
+    , AllEvents.PreviousZipCode AS PreviousZipCode
+    , AllEvents.ZipCode AS ZipCode
+    , AllEvents.PreviousAgentNumber AS PreviousAgentNumber
+    , AllEvents.AgentNumber AS AgentNumber
+    , Policy.BUS_ENTITY AS BusinessEntity
+    , Policy.LOB_TYP_CD AS LineOfBusinessCode
+    , Policy.PLCY_ST_CD AS PolicyStateCode
+    , COALESCE(AllEvents.SourceSystemCode, PolicyStats.SRC_SYS) AS SourceSystemCode
+    , AllEvents.SourceTransactionTimestamp AS SourceTransactionTimestamp
+
+    -- Link to PolicyRaw — flat PolicyID column (this entity's one documented
+    -- exception to the link-STRUCT convention; needed at build time so the
+    -- Wide Layer's OBJECT_CONSTRUCT(alias.*) can pack it as a flat field).
+    , PolicyRaw.ID AS PolicyID
+
+    -- System-specific raw fields — quarantined in a typed OBJECT, values
+    -- as-is, no aliases/transforms inside.
     , OBJECT_CONSTRUCT_KEEP_NULL(
-        'EventType', AllEvents.EventType
-        , 'EffectiveDate', CAST(AllEvents.EffectiveDate AS DATE)
-        , 'EventMonth', TO_CHAR(AllEvents.EffectiveDate, 'YYYY-MM')
-        , 'PreviousZipCode', AllEvents.PreviousZipCode
-        , 'ZipCode', AllEvents.ZipCode
-        , 'PreviousAgentNumber', AllEvents.PreviousAgentNumber
-        , 'AgentNumber', AllEvents.AgentNumber
-        , 'BusinessEntity', Policy.BUS_ENTITY
-        , 'LineOfBusinessCode', Policy.LOB_TYP_CD
-        , 'PolicyStateCode', Policy.PLCY_ST_CD
-        , 'SourceSystemCode', COALESCE(AllEvents.SourceSystemCode, PolicyStats.SRC_SYS)
-        , 'SourceTransactionTimestamp', AllEvents.SourceTransactionTimestamp
-        , 'Rten', OBJECT_CONSTRUCT_KEEP_NULL(
-            'PLCY_CNTRCT_NUM', AllEvents.PLCY_CNTRCT_NUM
-            , 'EFF_DT', CAST(AllEvents.EffectiveDate AS VARCHAR)
-            , 'SRC_TRANS_TMSP', CAST(AllEvents.SourceTransactionTimestamp AS VARCHAR)
-            , 'SRC_SYS_CD', AllEvents.SourceSystemCode
-            , 'PLCY_NUM', CAST(PolicyStats.PLCY_NUM AS VARCHAR)
-        )
-        , 'Policy', OBJECT_CONSTRUCT_KEEP_NULL('ID', PolicyRaw.ID)
+        'PLCY_CNTRCT_NUM', AllEvents.PLCY_CNTRCT_NUM
+        , 'EFF_DT', CAST(AllEvents.EffectiveDate AS VARCHAR)
+        , 'SRC_TRANS_TMSP', CAST(AllEvents.SourceTransactionTimestamp AS VARCHAR)
+        , 'SRC_SYS_CD', AllEvents.SourceSystemCode
+        , 'PLCY_NUM', CAST(PolicyStats.PLCY_NUM AS VARCHAR)
     )::OBJECT(
-        EventType                  VARCHAR
-        , EffectiveDate              DATE
-        , EventMonth                 VARCHAR
-        , PreviousZipCode            VARCHAR
-        , ZipCode                    VARCHAR
-        , PreviousAgentNumber        VARCHAR
-        , AgentNumber                VARCHAR
-        , BusinessEntity             VARCHAR
-        , LineOfBusinessCode         VARCHAR
-        , PolicyStateCode            VARCHAR
-        , SourceSystemCode           VARCHAR
-        , SourceTransactionTimestamp VARCHAR
-        , Rten                       OBJECT(PLCY_CNTRCT_NUM VARCHAR, EFF_DT VARCHAR, SRC_TRANS_TMSP VARCHAR, SRC_SYS_CD VARCHAR, PLCY_NUM VARCHAR)
-        , Policy                     OBJECT(ID VARCHAR)
-      ) AS ChangeEvent
+        PLCY_CNTRCT_NUM VARCHAR
+        , EFF_DT VARCHAR
+        , SRC_TRANS_TMSP VARCHAR
+        , SRC_SYS_CD VARCHAR
+        , PLCY_NUM VARCHAR
+    ) AS Rten
 
 FROM AllEvents
 LEFT JOIN {{ source('rten', 'rten_xcmpy_pif_tbl') }} AS Policy
@@ -180,17 +176,17 @@ LEFT JOIN {{ source('rten', 'rten_xcmpy_pif_tbl') }} AS Policy
 LEFT JOIN CurrentPolicyStats AS PolicyStats
     ON AllEvents.PLCY_CNTRCT_NUM = PolicyStats.PLCY_NUM
 LEFT JOIN {{ ref('PolicyRaw') }} AS PolicyRaw
-    ON AllEvents.PLCY_CNTRCT_NUM = PolicyRaw.Policy:SystemIds:RtenPlcyCntrctNum
+    ON AllEvents.PLCY_CNTRCT_NUM = PolicyRaw.SystemIds:RtenPlcyCntrctNum
 
 {% if is_incremental() %}
 WHERE AllEvents.SourceTransactionTimestamp > (
-    SELECT COALESCE(MAX(ChangeEventRawPrev.ChangeEvent:SourceTransactionTimestamp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
+    SELECT COALESCE(MAX(ChangeEventRawPrev.SourceTransactionTimestamp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
     FROM {{ this }} AS ChangeEventRawPrev
 )
 {% endif %}
 
     /*
-    Typed-OBJECT join:PolicyRaw.Policy:SystemIds:RtenPlcyCntrctNum — typed access, no ::VARCHAR.
-    This join carries PolicyRaw.ID into the ChangeEvent OBJECT (build-time, raw layer only).
-    Do NOT add a plain PolicyID column — see DEPLOY_HANDOFF.md §10. OBJECT-only doctrine.
+    Typed access: PolicyRaw.SystemIds:RtenPlcyCntrctNum — no ::VARCHAR cast
+    needed (typed OBJECT). This join carries PolicyRaw.ID into the flat
+    PolicyID column above (build-time, raw layer only).
     */

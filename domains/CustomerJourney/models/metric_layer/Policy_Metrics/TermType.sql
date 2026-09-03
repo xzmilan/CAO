@@ -9,7 +9,7 @@
 SELECT
     Policy.ID
     , CASE
-        WHEN Policy.Policy:PriorPolicyIndicator IS NULL THEN 'NB'
+        WHEN Policy.PriorPolicyIndicator IS NULL THEN 'NB'
         ELSE 'RB'
     END AS TermType
 FROM {{ ref('PolicyRaw') }} AS Policy

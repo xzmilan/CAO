@@ -1,17 +1,22 @@
 name: CustomerJourney dbt CI
 
+
 # CAO (Consumer Analytics Orchestration) This is a domain monorepo, meaning
 # multiple unrelated dbt projects live under CAO and all the tools we use
 # to test, format, etc can be applied to all domains. We can exclude rules 
 # if needed on specific domains, however some rules should apply to all. 
 #
-# 4 gates that have to pass before a PR will merge. None of them
-# touch Snowflake — the jinja templater catches any DAG issues, dbt parse
-# catches broken ref() and source() references (it validates that every model
-# you reference actually exists in the DAG — so you find out at PR time, not
-# deploy time), lint_all.py catches style + doctrine violations, and
-# check_column_contracts.py catches column-level breaks (renamed/deleted
-# fields silently breaking downstream Alias.Object:Field references).
+# Auto-Config for Github Actions. This workflow runs on PRs merged to main,  
+# and on a schedule (see below). It runs the following gates:
+# 4 jobs run before a PR will merge. None of them touch Snowflake:
+#   auto-fix        — sqlfluff fix mode (cosmetic only); pushes a commit and
+#                     exits 1 to trigger a clean re-run when it changes code.
+#   lint            — lint_all.py: Snowflake-syntax-safe sqlfluff + CAO
+#                     identifier doctrine (ID, UPPER_SNAKE, PascalCase).
+#   column-contracts — check_column_contracts.py: diff-scoped column-contract
+#                     break detection + hard-fails SELECT * over ref().
+#   compile         — dbt parse: validates Jinja + DAG (broken ref()/source(),
+#                     circular deps) so you find out at PR time, not deploy.
 #
 # Wide-layer regeneration is DEPLOY-TIME ONLY (customer_journey_deploy.yml).
 # The committed wide_layer/*.sql files are non-authoritative documentation —
@@ -60,9 +65,9 @@ jobs:
   # If fix_all.py changes anything, this job commits + pushes the fix straight
   # onto the PR branch, then exits 1 ON PURPOSE. That push starts a fresh
   # workflow run against the now-clean code, and THAT run is the one whose
-  # gates (auto-assembly → lint → compile) have to go green. The exit-1 here
-  # is expected, not a failure — the check goes green on the auto-triggered
-  # re-run a few seconds later.
+#  gates (lint → column-contracts → compile) have to go green. The exit-1
+#  here is expected, not a failure — the check goes green on the
+#  auto-triggered re-run a few seconds later.
   #
   # If fix_all.py makes no changes, this job just passes and the rest of the
   # gates run in this same run, exactly like before this job existed.

@@ -18,7 +18,7 @@ Tier 1. No metric logic lives outside Tier 2.
 RAW LAYER (Tier 1)        →  METRIC LAYER (Tier 2)  →  WIDE LAYER (Tier 3)  →  VIEW LAYER (Tier 4)
   Business concept tables     One file = one metric     Pure assembly, no logic   Consumer-facing views
   Hashed PKs, PascalCase      2 columns: ID + value     SELECT full STRUCTs only  WHERE filters allowed
-  No calculations             INNER JOIN only           No aliases, no CASE       ID aliased for BI
+  No calculations             LEFT JOIN (1:1 fill)      No aliases, no CASE       ID aliased for BI
 ```
 
 Every tier has exactly one job. If you find yourself putting logic from one tier into another,
@@ -75,13 +75,14 @@ If the very first artifact in a tool already contains a `SUM`, a `CASE`, or an a
 looking at a MEANS-only semantic layer — useful, but it inherited its IS from whatever table
 happened to be sitting underneath it, unowned and ungoverned. MESA is the only one that makes the
 IS a first-class, separately-owned artifact — the Raw Layer file — before any MEANS is written
-at all. (Full teaching writeup: `MESA/blog/Steven/SPINOFF_ENTITY_AS_MATERIAL_BRIDGE_ANALOGY.md`.)
+at all.
 
-**The data world is full of silent assumptions. MESA is here to change that.** Every tool in the
-table above works correctly on top of an identity question nobody wrote down. That's not a flaw
+This dbt project was created using MESA (Metric Encapsulated Semantic Architecture) standards, which applies engineering practices to data modeling.
+Why MESA works: Every tool in the table above works correctly on top of an identity question nobody wrote down. That's not a flaw
 in any one of them — it's the default state of the industry: computation is governed, identity is
 guessed. If you're reviewing a PR and you can't point to the one file that says what a `Customer`
-IS, the assumption is still silent. Make it a file before you make it a metric.
+IS, the assumption is still silent. Make it a file before you make it a metric. MESA removes the guesswork 
+and makes identity a first-class, reviewable, owned artifact.
 
 ### The assumptions this contract exists to close
 
@@ -94,7 +95,7 @@ tolerates. Use this table when someone asks "why are we so strict about this":
 | Everyone editing this shared model agrees on what changed | One file = one metric = one CODEOWNERS-enforced owner (Sec. 3) |
 | The relationship between two tables is obvious enough not to write down | Link STRUCTs declared once in the Raw Layer (Sec. 2) |
 | This column will still mean the same thing next quarter | Explicit column lists, `SELECT *` banned everywhere (Sec. 6, item 1) |
-| A LEFT JOIN silently tolerating missing rows is harmless | INNER JOIN only in the Metric Layer — no row, no silent NULL (Sec. 3) |
+| A LEFT JOIN silently tolerating missing rows is harmless | LEFT JOIN in the Metric Layer (1:1 zero/NULL-fill); INNER JOIN in the Wide Layer — no silent NULL (Sec. 3, Sec. 4) |
 | This metric doesn't already exist somewhere else | One browsable Metric Layer folder, one metric per file (Sec. 3) |
 | Cross-entity joins are safe wherever they're convenient | Entity isolation — cross-entity joins only at the View Layer, only on declared links (Sec. 5) |
 | Someone tested this before it shipped | dbt tests as a CI build gate, not a courtesy (Sec. 3, Sec. 7) |
@@ -176,8 +177,14 @@ clean.
   The file name IS the metric name.
 - **Exactly 2 columns:** `SELECT ID, [calculated_value] AS MetricName` — nothing more, nothing less.
   If you need a third column, you're defining two metrics in one file. Split them.
-- **INNER JOIN only:** `JOIN` (not `LEFT JOIN`) from the Raw Layer base table to the calc table.
-  If a metric can't be computed for a given ID, that row shouldn't appear in the calc output.
+- **LEFT JOIN (not INNER JOIN):** `LEFT JOIN` from the Raw Layer base table to the metric CTE.
+  Every entity ID emits a row — the 1:1 zero/NULL-fill contract. This is what makes the Wide
+  Layer mechanical: the metric resolves to exactly one value per entity ID, filled explicitly.
+  - **The fill must be explicit** — `COALESCE(..., 0)` for counts/flags, or a documented `NULL`
+    for scores (e.g., no survey response, no change event) — never a silent NULL.
+  - A metric may reach a child grain only via a CTE that `FLATTEN`/`UNNEST`s and then aggregates
+    back to entity grain — the terminal SELECT is always 1:1 per ID.
+  - *(INNER JOIN belongs to the Wide Layer, not here — see Sec. 4.)*
 - **Source from Raw Layer only:** Metrics reference Raw Layer tables and other metrics from the
   same entity. They never reference raw source tables directly.
 - **Handle grain reduction internally:** If a metric aggregates from a child grain (e.g., total
@@ -220,7 +227,8 @@ room to work — as long as you land on one row per ID.
 
 ### What the Metric Layer MUST NOT do:
 - ❌ No `SELECT *` — every column is explicit
-- ❌ No LEFT JOIN — use INNER JOIN
+- ❌ No INNER JOIN — use LEFT JOIN with an explicit `COALESCE`/documented NULL fill (never a
+  silent NULL). A metric's base entity must emit a row for every ID.
 - ❌ No raw source table references — Raw Layer only
 - ❌ No `WITH RECURSIVE` — the build system wraps each metric as a CTE, and recursive CTEs break
   the assembly step
@@ -237,9 +245,12 @@ The Wide Layer is the dumbest layer in the stack — and that's exactly what mak
 It does one thing: joins the Raw Layer entity to its Metric Layer calcs. Nothing else.
 
 ### What the Wide Layer MUST do:
-- **SELECT full STRUCTs only:** `SELECT Customer, CustomerCalc` — the entire Raw Layer object and
-  the entire Calc object, passed through as STRUCTs
-- **JOIN on ID only:** `JOIN Calc_Shared.CustomerCalc ON Customer.ID = CustomerCalc.ID`
+- **SELECT full STRUCTs only:** `SELECT Customer, CustomerMetrics` — the entire Raw Layer object and
+  the entire Metric object, passed through as STRUCTs for BigQuery and a python script for Snowflake/Redshift/AWS. No individual column selection, no aliases, no CASE statements, no renaming.
+- **JOIN on ID only (INNER JOIN):** `JOIN Metrics.CustomerMetrics ON Customer.ID = CustomerMetrics.ID`
+  — the Wide Layer is the one place INNER JOIN lives. Because every metric already emitted a
+  row per ID (LEFT-JOIN 1:1 fill in Sec. 3), the INNER JOIN here drops nothing and is purely
+  mechanical.
 - **Include related entities:** The Wide Layer can join additional Raw Layer tables via the link
   STRUCTs declared in the Raw Layer (e.g., Customer wide table includes Person data via the
   `Persons` link STRUCT)
@@ -272,7 +283,7 @@ single job it has latitude:
   Wide Layer file, something has gone wrong.
 
 The Wide Layer has exactly one job: assembly. If you put logic here, you've created a hidden
-calc layer that nobody knows to audit, and you've broken the mechanical contract that makes
+metric layer that nobody knows to audit, and you've broken the mechanical contract that makes
 the Wide Layer auto-generatable.
 
 ---
@@ -357,9 +368,8 @@ what a line *looks like* it does and what it *actually* does.
 | `INNER JOIN` only in Metric Layer, never `LEFT JOIN` | Fail loud, not quiet | "A NULL and a missing row mean the same thing" |
 | Doctrine header on every Raw Layer file (grain, ID formula, rules) | Contracts declared, not discovered | "Anyone can infer the grain and identity rule just by reading the SELECT" |
 
-Full write-up with the specific failure mode each rule prevents:
-`MESA/blog/Steven/SPINOFF_SMALL_RULES_BIG_PRINCIPLES.md`. If an analyst pushes back on one of
-these as "just bureaucracy," that's the file to send them — every rule there is tied to a bug it
+If an analyst pushes back on one of these as "just bureaucracy," it's common and expected. Because MESA 
+applies engineering standards to data every rule there is tied to a bug it
 has actually prevented, not a style preference.
 
 ### The `SELECT *` ban — why it's structural, not stylistic:
@@ -411,32 +421,34 @@ These are hard stops. If you see any of these in a PR, reject it immediately —
 issues, they're architecture violations:
 
 1. **`SELECT *` in any tier** — breaks schema contracts, hides changes, fails governance
-2. **Business logic in the Wide Layer** — creates hidden, unauditable calc paths
+2. **Business logic in the Wide Layer** — creates hidden, unauditable metric paths
 3. **Raw source references in Metric or View Layers** — bypasses the Raw Layer contract
 4. **More than 2 columns in a Metric file** — breaks the one-file-one-metric contract
-5. **LEFT JOIN in the Metric Layer** — use INNER JOIN; if a metric can't be computed, the row
-   shouldn't exist
+5. **INNER JOIN in the Metric Layer** — use LEFT JOIN with an explicit `COALESCE`/documented
+   NULL fill (never a silent NULL). INNER JOIN is the Wide Layer's job (Sec. 4).
 6. **Bare `CAST` instead of `SAFE_CAST`** — kills queries on bad data instead of returning NULL
 7. **System IDs as top-level columns** — they live in system-specific STRUCTs only
 8. **Cross-entity joins at the Raw Layer** — relationships are declared via link STRUCTs, not
    by joining two Raw Layer tables together
-9. **Metric logic in the View Layer** — if you're computing a value, it's a metric; put it in Tier 2
+9. **Metric logic in the View Layer** — if you're computing a value, it's a metric; put it in Tier 2 
+    
+    (UNION+dedup reshaping is allowed in Tier 4. Period re-aggregation is allowed only for additive metrics — sums, counts, min/max. Ratios, averages, and distinct counts must stay at their Metric Layer grain or get a new metric file at the target grain. If you find yourself writing AVG() over an existing average, stop — that's a new metric, not a view.)
 10. **Hand-editing Wide Layer files** — they're auto-generated; manual edits will be overwritten
 
 ---
 
-## 8. ONBOARDING A NEW CLIENT
+## 8. ONBOARDING A NEW DOMAIN 
 
-When a new client engagement starts, do NOT modify this file. Instead:
+When a new domain is added, do NOT modify this file. Instead:
 
-1. Scaffold `domains/<NewClient>/` with the four-layer `models/` structure
+1. Scaffold `domains/<NewDomain>/` with the four-layer `models/` structure
    (`raw_layer / metric_layer / wide_layer / view_layer`).
-2. Put client-specific rules in that domain: source-system names, natural keys, grain decisions,
-   BI-tool wiring, and a SQL-standards reference file if the client has one.
-3. Add a `/domains/<NewClient>/  @owner` entry to `CODEOWNERS`.
+2. Put domain-specific rules in that domain: source-system names, natural keys, grain decisions,
+   BI-tool wiring, and a SQL-standards reference file if the domain has one.
+3. Add a `/domains/<NewDomain>/  @owner` entry to `CODEOWNERS`.
 4. Reference this file from the domain so the AI agent picks up both — the universal contract
-   (here) and the client specifics (in the domain).
+   (here) and the domain specifics (in the domain).
 
-The four-tier contract above does not change per client. What changes is the source map, the
+The four-tier contract above does not change per domain. What changes is the source map, the
 naming of business concepts, and the list of systems feeding the Raw Layer — all of which live
-in the client's domain folder, not in this universal instruction file.
+in the domain's folder, not in this universal instruction file.

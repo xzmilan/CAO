@@ -7,20 +7,20 @@
 -- metric-supplied atoms (InForce90Flag). GROUP BY ALL, no positionals.
 
 SELECT
-    Policy.LoadMonth:LoadMonth AS LoadMonth
+    Policy.PolicyMetrics:LoadMonth AS LoadMonth
     , Policy.Policy:BusinessEntity AS BusinessEntity
     , Policy.Policy:LineOfBusinessCode AS LineOfBusinessCode
     , Policy.Policy:PolicyStateCode AS PolicyStateCode
-    , Policy.InceptionMonth:InceptionMonth AS InceptionMonth
+    , Policy.PolicyMetrics:InceptionMonth AS InceptionMonth
     , COUNT(*) AS NumberOfNewBusinessPolicies
-    , SUM(CASE WHEN Policy.InForce90Flag:InForce90Flag = 1 THEN 1 ELSE 0 END) AS NumberInForce90Days
+    , SUM(CASE WHEN Policy.PolicyMetrics:InForce90Flag = 1 THEN 1 ELSE 0 END) AS NumberInForce90Days
     , DIV0(
-        SUM(CASE WHEN Policy.InForce90Flag:InForce90Flag = 1 THEN 1 ELSE 0 END),
+        SUM(CASE WHEN Policy.PolicyMetrics:InForce90Flag = 1 THEN 1 ELSE 0 END),
         COUNT(*)
     ) AS RetentionRatio90Days
 FROM {{ ref('PolicyWide') }} AS Policy
 WHERE
-    Policy.TermType:TermType = 'NB'
+    Policy.PolicyMetrics:TermType = 'NB'
     AND Policy.Policy:BusinessEntity = 'FARMERS'
     AND Policy.Policy:PolicyStateCode = 'CA'
     AND Policy.Policy:LineOfBusinessCode = 'AUTO'

@@ -2,74 +2,53 @@
 """
 generate_wide_layer.py — Auto-discovery / auto-assembly for CustomerJourney wide tables
 ==========================================================================================
-Scans models/metric_layer/<Entity>_Metrics/*.sql, discovers every metric file,
-and regenerates the matching models/wide_layer/<Entity>Wide.sql.
+Scans models/metric_layer/ for the entities discovered by the sibling
+generator (tools/generate_metrics_combiner.py) and regenerates the matching
+models/wide_layer/<Entity>Wide.sql as a TWO-JOIN, flat-column wide table:
 
-So adding a metric is "drop a file in metric_layer/, run this script" — you
-never need to hand-edit the wide model's OBJECT_CONSTRUCT_KEEP_NULL/JOIN lines.
+    SELECT
+        OBJECT_CONSTRUCT(Policy.*) AS Policy
+        , OBJECT_CONSTRUCT(PolicyMetrics.*) AS PolicyMetrics
+    FROM {{ ref('PolicyRaw') }} AS Policy
+    JOIN {{ ref('policy_metrics') }} AS PolicyMetrics
+        ON Policy.ID = PolicyMetrics.ID
 
-WHY THIS EXISTS (read DEPLOY_HANDOFF.md §§4 and 9 first)
---------------------------------------------------------
+This is Snowflake's qualified-wildcard OBJECT_CONSTRUCT pattern — packing a
+joined relation's columns into one named OBJECT without an explicit column
+list. See generate_metrics_combiner.py for why the per-metric joins live in
+a combiner model instead of directly in this file.
+
+WHY THIS EXISTS
+----------------
 Snowflake's server-side dbt runtime (CREATE/EXECUTE DBT PROJECT) can't see
 the project's file list at compile time — it gets an EMPTY graph. So
 "discover every metric file and regenerate the assembly" is IMPOSSIBLE to run
-inside Snowflake today. This is a verified limitation — documented in
-Snow_dbt_writeup_farmers.md §3/Step 3.
+inside Snowflake itself.
 
 This script is the fix: it runs OUTSIDE Snowflake (locally, or as a GitHub
-Action — see .github/workflows/customer_journey_ci.yml) where the real file
-list is visible, and writes the wide-layer .sql files that get committed and
-deployed.
-
-Same generator pattern already proven in MESAProductDev:
-  - mesa_redshift/generate_calc_views.py       (calc-file → assembled model)
-  - model_zoo_bq/tools/mesa_migrate.py          (migration-time stub generator)
-adapted here for CustomerJourney's specific wide-table shape: ONE
-OBJECT_CONSTRUCT_KEEP_NULL(...)::OBJECT(...) column PER metric (not a
-SELECT Base.*, Metrics.* pattern). This project's doctrine keeps every
-metric's fields isolated in its own named OBJECT column — see
-DEPLOY_HANDOFF.md §10 (OBJECT-only doctrine) and the PolicyWide/
-ChangeEventWide files already in models/wide_layer/.
+Action — see .github/workflows/customer_journey_ci.yml and
+customer_journey_deploy.yml) where the real file list is visible, and writes
+the wide-layer .sql files that get committed/deployed. Run this AFTER
+tools/generate_metrics_combiner.py — the wide layer now depends on the
+combiner model existing, not on the individual metric files directly.
 
 WHAT COUNTS AS AN "ENTITY"
 ---------------------------
 Every subfolder of models/metric_layer/ named "<Entity>_Metrics" (e.g.
 "Policy_Metrics", "ChangeEvent_Metrics") is one entity. Its raw model is
-assumed to be "<Entity>Raw" (e.g. "PolicyRaw", "ChangeEventRaw") — this
-matches the project's existing raw_layer/<Entity>/<Entity>Raw.sql convention.
-Its wide model gets written to models/wide_layer/<Entity>Wide.sql.
-
-HOW EACH METRIC FILE IS READ
------------------------------
-Every *.sql file directly inside an "<Entity>_Metrics/" folder is one metric
-model. Filenames starting with "_" are skipped (the _policy_metrics.yml schema
-files are already skipped by extension). The metric name = the filename stem
-(e.g. "InForce90Flag.sql" → metric "InForce90Flag") — matching this project's
-1-metric-per-file convention (see DEPLOY_HANDOFF.md §4).
-
-Each metric's Snowflake column TYPE (needed for the ::OBJECT(<Metric> <TYPE>)
-cast) is determined in this priority order:
-  1. An explicit annotation comment in the file:
-       -- WIDE_TYPE: NUMBER
-     (case-insensitive, any Snowflake scalar type). If the heuristic below
-     would guess wrong, add this comment — it's one line, reviewed in the
-     same PR as the metric logic.
-  2. A heuristic based on the metric's final SELECT expression. Regexes for
-     common patterns: CASE...THEN 1/0 → NUMBER, TO_CHAR(...) → VARCHAR,
-     AVG(...)/RATE/RATIO in the name → FLOAT, DATEDIFF/COUNT/SUM → NUMBER.
-  3. Fallback: VARCHAR, with a printed WARNING telling you to add a
-     WIDE_TYPE annotation. It NEVER silently guesses wrong without saying so.
+"<Entity>Raw". Its combiner model (built by generate_metrics_combiner.py)
+is "<entity_snake>_metrics" (e.g. "policy_metrics"). Its wide model gets
+written to models/wide_layer/<Entity>Wide.sql.
 
 JOIN TYPE (INNER vs LEFT)
 --------------------------
-PolicyWide INNER JOINs every metric (zero-fill contract — every policy has
-every metric). ChangeEventWide LEFT JOINs (the doctrine in _wide.yml says
-LEFT JOIN, even though today every event does have every flag).
-
-Configurable per-entity via --join-type. Default reads from
-JOIN_TYPE_BY_ENTITY below — extend that dict for new entities. Unset entities
-default to LEFT JOIN (the safer default — never silently drops a row that
-lacks one metric).
+This is now the ONLY join in the wide table (raw ↔ combiner, both already
+1:1 with every ID by construction — the combiner LEFT JOINs every metric
+onto the full set of raw IDs, so it's already a complete superset).
+PolicyWide INNER JOINs (zero-fill contract preserved — every policy has a
+combiner row). ChangeEventWide LEFT JOINs, matching the pre-existing
+_wide.yml doctrine. Configurable per-entity via JOIN_TYPE_BY_ENTITY below.
+Unset entities default to LEFT JOIN (the safer default).
 
 USAGE
 -----
@@ -107,50 +86,10 @@ JOIN_TYPE_BY_ENTITY: dict[str, str] = {
     "ChangeEvent": "LEFT",
 }
 
-#  Anchored to end-of-line ([^\n]+) rather than a whitespace-inclusive
-# character class — the earlier version's char class included \s, which let
-# it match across blank lines into the next SQL block (WITH/SELECT/...) for
-# any metric file whose CTE body starts on the next non-blank line. Always
-# keep this anchored to a single line.
-WIDE_TYPE_ANNOTATION_RE = re.compile(r"--\s*WIDE_TYPE\s*:\s*([^\n]+)", re.IGNORECASE)
 
-# Heuristic type-inference regexes, checked in order against the metric's
-# raw SQL text. First match wins. This is intentionally conservative —
-# ambiguous cases fall through to the VARCHAR-with-warning default rather
-# than guessing confidently wrong.
-TYPE_HEURISTICS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"\bTO_CHAR\s*\(", re.IGNORECASE), "VARCHAR"),
-    (re.compile(r"\bAVG\s*\(", re.IGNORECASE), "FLOAT"),
-    (re.compile(r"RETENTION\s*RATE|RATIO", re.IGNORECASE), "FLOAT"),
-    (re.compile(r"\bCASE\b.*?\bTHEN\s+1\b.*?\bELSE\s+0\b", re.IGNORECASE | re.DOTALL), "NUMBER"),
-    # Snowflake IFF(condition, 1, 0) — same 0/1 flag pattern as CASE/WHEN, just
-    # the more compact Snowflake-native form (see InForce90DaysAfterChangeFlag.sql).
-    (re.compile(r"\bIFF\s*\(.*?,\s*1\s*,\s*0\s*\)", re.IGNORECASE | re.DOTALL), "NUMBER"),
-    (re.compile(r"\bSUM\s*\(", re.IGNORECASE), "NUMBER"),
-    (re.compile(r"\bCOUNT\s*\(", re.IGNORECASE), "NUMBER"),
-    (re.compile(r"\bDATEDIFF\s*\(", re.IGNORECASE), "NUMBER"),
-]
-
-
-class MetricFile:
-    def __init__(self, path: Path):
-        self.path = path
-        self.name = path.stem  # e.g. "InForce90Flag"
-        self.raw_sql = path.read_text(encoding="utf-8")
-
-    def resolve_wide_type(self) -> tuple[str, bool]:
-        """Returns (snowflake_type, was_inferred). was_inferred=True means
-        no explicit WIDE_TYPE annotation was found and a heuristic (or the
-        VARCHAR fallback) was used — caller should warn in that case."""
-        m = WIDE_TYPE_ANNOTATION_RE.search(self.raw_sql)
-        if m:
-            return m.group(1).strip().upper(), False
-
-        for pattern, sf_type in TYPE_HEURISTICS:
-            if pattern.search(self.raw_sql):
-                return sf_type, True
-
-        return "VARCHAR", True
+def _to_snake(name: str) -> str:
+    """PascalCase -> snake_case (e.g. "ChangeEvent" -> "change_event")."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
 
 class Entity:
@@ -158,16 +97,18 @@ class Entity:
         self.metrics_dir = metrics_dir
         # "Policy_Metrics" -> "Policy" ; "ChangeEvent_Metrics" -> "ChangeEvent"
         self.name = re.sub(r"_Metrics$", "", metrics_dir.name)
+        self.snake = _to_snake(self.name)
         self.raw_model = f"{self.name}Raw"
+        self.combiner_model = f"{self.snake}_metrics"
         self.wide_model = f"{self.name}Wide"
-        self.metrics = self._discover_metrics()
+        self.metric_count = len(self._discover_metrics())
 
-    def _discover_metrics(self) -> list[MetricFile]:
+    def _discover_metrics(self) -> list[Path]:
         found = []
         for sql_path in sorted(self.metrics_dir.glob("*.sql")):
             if sql_path.stem.startswith("_"):
                 continue
-            found.append(MetricFile(sql_path))
+            found.append(sql_path)
         return found
 
     @property
@@ -192,46 +133,42 @@ def discover_entities(only_entity: str | None = None) -> list[Entity]:
 
 
 def build_wide_sql(entity: Entity) -> str:
-    entity_var = entity.name  # e.g. "Policy" — used as the raw-relation alias/column name
+    entity_var = entity.name  # e.g. "Policy" — raw-relation alias
+    metrics_var = f"{entity.name}Metrics"  # e.g. "PolicyMetrics" — combiner alias
+
     header = (
-        f"-- WIDE LAYER: {entity.name} Wide Table\n"
+        f"-- WIDE LAYER: {entity.name} Wide Table (AUTO-GENERATED)\n"
         f"-- AUTO-GENERATED by tools/generate_wide_layer.py — DO NOT EDIT BY HAND.\n"
+        f"-- Snowflake OBJECT_CONSTRUCT(alias.*) — qualified wildcard, auto-expanding.\n"
+        f"-- No explicit column list, no logic, zero maintenance.\n"
         f"-- Regenerate after adding/removing a file in models/metric_layer/{entity.metrics_dir.name}/:\n"
+        f"--   python3 tools/generate_metrics_combiner.py --entity {entity.name}\n"
         f"--   python3 tools/generate_wide_layer.py --entity {entity.name}\n"
-        f"-- Auto-assembly: one OBJECT per relation (raw + each metric model).\n"
-        f"-- No combiner. No hand-maintained column list. Metric OBJECTs carry the\n"
-        f"-- measure only — the join key ID is implicit (never selected from the\n"
-        f"-- metric model directly, so it never needs stripping).\n"
-        f"-- Consumer access: {entity.wide_model}.{entity_var}:<Field> / "
-        f"{entity.wide_model}.<MetricName>:<MetricName> / ...\n"
+        f"-- (run the combiner generator FIRST — the wide layer joins against\n"
+        f"-- its output, {entity.combiner_model}, not the individual metric files.)\n"
+        f"-- Owner: CI/CD (mechanically generated, do not edit by hand)\n"
+        f"--\n"
+        f"-- HOW IT WORKS (Snowflake):\n"
+        f"--   OBJECT_CONSTRUCT({entity_var}.*) packs the entire row from the {entity_var} alias into a named OBJECT.\n"
+        f"--   OBJECT_CONSTRUCT({metrics_var}.*) does the same for the combined metrics alias.\n"
+        f"--   The qualified wildcard (alias.*) ensures each OBJECT only contains columns from its own source.\n"
+        f"--   Adding a column upstream (a new metric file + combiner regen) expands the OBJECT automatically —\n"
+        f"--   nothing downstream breaks.\n"
+        f"--\n"
+        f"--   NOTE: bare OBJECT_CONSTRUCT(*) after a JOIN is WRONG — it packs ALL joined columns into BOTH objects.\n"
+        f"--   Always qualify with the alias: OBJECT_CONSTRUCT({entity_var}.*), OBJECT_CONSTRUCT({metrics_var}.*).\n"
+        f"-- Consumer access: {entity.wide_model}.{entity_var}:<Field> / {entity.wide_model}.{metrics_var}:<MetricName> / ...\n"
     )
 
-    raw_col_expr = f"{entity_var}.{entity_var}"
-    # Single-space before AS (CAO Option-2 / MESA style — no column alignment).
-    # LT01 enforces exactly one space; do not pad for alignment here or the
-    # auto-generated file will fail the lint gate on every regeneration.
-    select_lines = [f"    {raw_col_expr} AS {entity_var}"]
-    for metric in entity.metrics:
-        sf_type, inferred = metric.resolve_wide_type()
-        if inferred:
-            print(
-                f"  WARNING: {metric.path.relative_to(REPO_ROOT)} has no '-- WIDE_TYPE: <TYPE>' "
-                f"annotation — inferred {sf_type} via heuristic. Add the annotation if this is wrong.",
-                file=sys.stderr,
-            )
-        select_lines.append(
-            f"    , OBJECT_CONSTRUCT_KEEP_NULL('{metric.name}', {metric.name}.{metric.name})"
-            f"::OBJECT({metric.name} {sf_type}) AS {metric.name}"
-        )
+    body = (
+        f"SELECT\n"
+        f"    OBJECT_CONSTRUCT({entity_var}.*) AS {entity_var}\n"
+        f"    , OBJECT_CONSTRUCT({metrics_var}.*) AS {metrics_var}\n"
+        f"FROM {{{{ ref('{entity.raw_model}') }}}} AS {entity_var}\n"
+        f"{entity.join_type} JOIN {{{{ ref('{entity.combiner_model}') }}}} AS {metrics_var}\n"
+        f"    ON {entity_var}.ID = {metrics_var}.ID\n"
+    )
 
-    join_lines = [f"FROM {{{{ ref('{entity.raw_model}') }}}} AS {entity_var}"]
-    for metric in entity.metrics:
-        join_lines.append(
-            f"{entity.join_type} JOIN {{{{ ref('{metric.name}') }}}} AS {metric.name}\n"
-            f"    ON {entity_var}.ID = {metric.name}.ID"
-        )
-
-    body = "SELECT\n" + "\n".join(select_lines) + "\n" + "\n".join(join_lines) + "\n"
     return header + "\n" + body
 
 
@@ -252,7 +189,7 @@ def main(argv: list[str]) -> int:
 
     print(f"Discovered {len(entities)} entit{'y' if len(entities) == 1 else 'ies'}:")
     for entity in entities:
-        print(f"  {entity.name:15s} -> {len(entity.metrics)} metrics -> {entity.wide_model}.sql "
+        print(f"  {entity.name:15s} -> {entity.metric_count} metrics -> {entity.combiner_model}.sql -> {entity.wide_model}.sql "
               f"({entity.join_type} JOIN)")
 
     drift_found = False

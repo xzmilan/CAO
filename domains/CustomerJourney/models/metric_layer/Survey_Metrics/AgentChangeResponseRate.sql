@@ -7,6 +7,6 @@
 
 SELECT
     Survey.ID
-    , Survey.Survey:ResponseRate AS AgentChangeResponseRate
+    , Survey.ResponseRate AS AgentChangeResponseRate
 FROM {{ ref('SurveyRaw') }} AS Survey
-WHERE Survey.Survey:SurveyType = 'AGENT_CHANGE'
+WHERE Survey.SurveyType = 'AGENT_CHANGE'

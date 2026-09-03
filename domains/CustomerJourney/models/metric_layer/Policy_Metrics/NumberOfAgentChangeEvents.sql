@@ -7,12 +7,12 @@
 
 WITH AgentChangeCounts AS (
     SELECT
-        ChangeEvent.ChangeEvent:Policy:ID::VARCHAR AS PolicyID
+        ChangeEvent.PolicyID
         , SUM(IsAgentChangeEvent.IsAgentChangeEvent) AS NumberOfAgentChangeEvents
     FROM {{ ref('ChangeEventRaw') }} AS ChangeEvent
     JOIN {{ ref('IsAgentChangeEvent') }} AS IsAgentChangeEvent
         ON ChangeEvent.ID = IsAgentChangeEvent.ID
-    GROUP BY ChangeEvent.ChangeEvent:Policy:ID::VARCHAR
+    GROUP BY ChangeEvent.PolicyID
 )
 
 SELECT

@@ -13,6 +13,6 @@ SELECT
     , Survey.Survey:InvitesSent AS InvitesSent
     , Survey.Survey:ResponseCount AS ResponseCount
     , Survey.Survey:ResponseRate AS ResponseRate
-    , Survey.RnpsAvgNps:RnpsAvgNps AS RnpsAvgNps
+    , Survey.SurveyMetrics:RnpsAvgNps AS RnpsAvgNps
 FROM {{ ref('SurveyWide') }} AS Survey
 WHERE Survey.Survey:SurveyType = 'RNPS'

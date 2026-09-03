@@ -15,8 +15,8 @@ SELECT
     , Policy.Policy:PolicyStateCode AS PolicyStateCode
     , Policy.Policy:SourceSystemCode AS SourceSystemCode
     , Policy.Policy:ZipCode AS ZipCode
-    , Policy.NumberOfZipChangeEvents:NumberOfZipChangeEvents AS NumberOfZipChangeEvents
-    , Policy.NumberOfMovedPoliciesInForce90Days:NumberOfMovedPoliciesInForce90Days AS NumberOfMovedPoliciesInForce90Days
-    , Policy.MovedPolicyRetentionRate90Days:MovedPolicyRetentionRate90Days AS MovedPolicyRetentionRate90Days
+    , Policy.PolicyMetrics:NumberOfZipChangeEvents AS NumberOfZipChangeEvents
+    , Policy.PolicyMetrics:NumberOfMovedPoliciesInForce90Days AS NumberOfMovedPoliciesInForce90Days
+    , Policy.PolicyMetrics:MovedPolicyRetentionRate90Days AS MovedPolicyRetentionRate90Days
 FROM {{ ref('PolicyWide') }} AS Policy
-WHERE Policy.NumberOfZipChangeEvents:NumberOfZipChangeEvents > 0
+WHERE Policy.PolicyMetrics:NumberOfZipChangeEvents > 0

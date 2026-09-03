@@ -9,5 +9,5 @@ customer_journey:
       database: PRD_BIZDB_PL_MARKETING
       schema: CUSTOMERJOURNEY
       warehouse: PRD_IT_EBI_WH
-      role: BIZDB_PL_MARKETING_ADMIN
+      role: "FARMERS OKTA SFLAKE_ WKSP_PL_MARKETING_RW"
       threads: 8

@@ -12,8 +12,8 @@ WITH CssCesSurveys AS (
         , AVG(SurveyResponse.value:NpsScore::NUMBER) AS AvgNpsScore
         , COUNT(*) AS SurveyResponseCount
     FROM {{ ref('SurveyRaw') }} AS Survey
-    CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Survey:Responses) AS SurveyResponse
-    WHERE Survey.Survey:SurveyType = 'CSS_CES'
+    CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Responses) AS SurveyResponse
+    WHERE Survey.SurveyType = 'CSS_CES'
     GROUP BY SurveyResponse.value:SystemIds.PolicyNumber::VARCHAR
 )
 
@@ -22,4 +22,4 @@ SELECT
     , CssCesSurveys.AvgNpsScore AS CssCesScore
 FROM {{ ref('PolicyRaw') }} AS Policy
 LEFT JOIN CssCesSurveys
-    ON Policy.Policy:SystemIds.RtenPlcyCntrctNum = CssCesSurveys.PolicyNumber
+    ON Policy.SystemIds:RtenPlcyCntrctNum = CssCesSurveys.PolicyNumber

@@ -12,8 +12,8 @@ WITH RnpsSurveys AS (
         , AVG(SurveyResponse.value:NpsScore::NUMBER) AS AvgNpsScore
         , COUNT(*) AS SurveyResponseCount
     FROM {{ ref('SurveyRaw') }} AS Survey
-    CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Survey:Responses) AS SurveyResponse
-    WHERE Survey.Survey:SurveyType = 'RNPS'
+    CROSS JOIN LATERAL FLATTEN(INPUT => Survey.Responses) AS SurveyResponse
+    WHERE Survey.SurveyType = 'RNPS'
     GROUP BY SurveyResponse.value:SystemIds.PolicyNumber::VARCHAR
 )
 
@@ -22,4 +22,4 @@ SELECT
     , RnpsSurveys.AvgNpsScore AS RnpsScore
 FROM {{ ref('PolicyRaw') }} AS Policy
 LEFT JOIN RnpsSurveys
-    ON Policy.Policy:SystemIds.RtenPlcyCntrctNum = RnpsSurveys.PolicyNumber
+    ON Policy.SystemIds:RtenPlcyCntrctNum = RnpsSurveys.PolicyNumber

@@ -7,13 +7,13 @@
 -- aggregation over metric-supplied atoms only. GROUP BY ALL, no positionals.
 
 SELECT
-    Policy.LoadMonth:LoadMonth AS LoadMonth
+    Policy.PolicyMetrics:LoadMonth AS LoadMonth
     , Policy.Policy:BusinessEntity AS BusinessEntity
-    , Policy.InceptionMonth:InceptionMonth AS InceptionMonth
+    , Policy.PolicyMetrics:InceptionMonth AS InceptionMonth
     , COUNT(*) AS NumberOfNewBusinessPolicies
 FROM {{ ref('PolicyWide') }} AS Policy
 WHERE
-    Policy.TermType:TermType = 'NB'
+    Policy.PolicyMetrics:TermType = 'NB'
     AND Policy.Policy:BusinessEntity = 'FWS'
 GROUP BY ALL
 ORDER BY InceptionMonth

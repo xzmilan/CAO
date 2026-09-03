@@ -15,5 +15,5 @@ SELECT
         ELSE 0
     END) AS NumberOfPoliciesInForce
 FROM {{ ref('PolicyRaw') }} AS Policy
-CROSS JOIN LATERAL FLATTEN(INPUT => Policy.Policy:MonthlySnapshots) AS PolicyMonthly
+CROSS JOIN LATERAL FLATTEN(INPUT => Policy.MonthlySnapshots) AS PolicyMonthly
 GROUP BY Policy.ID

@@ -10,7 +10,7 @@
 
 WITH AgentChangeRetention AS (
     SELECT
-        ChangeEvent.ChangeEvent:Policy:ID::VARCHAR AS PolicyID
+        ChangeEvent.PolicyID
         , AVG(
             IsAgentChangeEvent.IsAgentChangeEvent
             * InForce90DaysAfterChangeFlag.InForce90DaysAfterChangeFlag)
@@ -21,7 +21,7 @@ WITH AgentChangeRetention AS (
     JOIN {{ ref('InForce90DaysAfterChangeFlag') }} AS InForce90DaysAfterChangeFlag
         ON ChangeEvent.ID = InForce90DaysAfterChangeFlag.ID
     WHERE IsAgentChangeEvent.IsAgentChangeEvent = 1
-    GROUP BY ChangeEvent.ChangeEvent:Policy:ID::VARCHAR
+    GROUP BY ChangeEvent.PolicyID
 )
 
 SELECT

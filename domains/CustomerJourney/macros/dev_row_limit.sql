@@ -1,3 +1,4 @@
+-- USE FOR DEV/TESTING ONLY. DO NOT USE IN PROD.
 {% macro customer_journey__apply_dev_row_limit(sql) -%}
   {% set row_limit = var('dev_row_limit', none) %}
 

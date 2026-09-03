@@ -1,8 +1,10 @@
 -- RAW ENTITY: Survey
 -- Grain: one row per survey campaign/invite wave (e.g., "Agent Change Jan 2026")
 -- ID: hashed primary key — BASE64_ENCODE(SHA2(SurveyType || '|' || InviteWave, 256))
--- Doctrine: campaign grain is FIRST-CLASS. Individual responses are nested
---           as a typed ARRAY of OBJECTs — consumers FLATTEN when they need
+-- Doctrine  1:1 campaign attributes (SurveyType, InviteWave, InvitesSent,
+--           ResponseCount, ResponseRate) are FLAT TOP-LEVEL COLUMNS — no
+--           wrapping "Survey" OBJECT. Individual responses stay nested as
+--           a typed ARRAY of OBJECTs — consumers FLATTEN when they need
 --           response grain. System IDs in typed OBJECTs, never bare.
 --           Semantic links carry ONLY the hashed ID (hash-only doctrine).
 --           THIS ENTITY IS THE CONTRACT for all survey data.
@@ -77,7 +79,7 @@ WITH AgentChangeResponses AS (
     {% if is_incremental() %}
     WHERE DATE_TRUNC('month', AgentChangeInvite.UPLOAD_DT) >= DATEADD(
         'month', -3,
-        (SELECT COALESCE(MAX(SurveyRawPrev.Survey:InviteWave::DATE), CURRENT_DATE) FROM {{ this }} AS SurveyRawPrev)
+        (SELECT COALESCE(MAX(SurveyRawPrev.InviteWave::DATE), CURRENT_DATE) FROM {{ this }} AS SurveyRawPrev)
     )
     {% endif %}
     GROUP BY
@@ -88,12 +90,15 @@ WITH AgentChangeResponses AS (
 SELECT
     BASE64_ENCODE(SHA2(AgentChangeCampaign.SurveyType || '|' || CAST(AgentChangeCampaign.InviteWave AS VARCHAR), 256)) AS ID
 
-    , OBJECT_CONSTRUCT_KEEP_NULL(
-        'SurveyType', AgentChangeCampaign.SurveyType
-        , 'InviteWave', CAST(AgentChangeCampaign.InviteWave AS DATE)
-        , 'InvitesSent', AgentChangeCampaign.InvitesSent
-        , 'ResponseCount', ARRAY_SIZE(AgentChangeCampaign.Responses)
-        , 'ResponseRate', DIV0(ARRAY_SIZE(AgentChangeCampaign.Responses), AgentChangeCampaign.InvitesSent)
-        , 'Responses', AgentChangeCampaign.Responses
-    ) AS Survey
+    -- 1:1 campaign attributes — FLAT top-level columns.
+    , AgentChangeCampaign.SurveyType AS SurveyType
+    , CAST(AgentChangeCampaign.InviteWave AS DATE) AS InviteWave
+    , AgentChangeCampaign.InvitesSent AS InvitesSent
+    , ARRAY_SIZE(AgentChangeCampaign.Responses) AS ResponseCount
+    , DIV0(ARRAY_SIZE(AgentChangeCampaign.Responses), AgentChangeCampaign.InvitesSent) AS ResponseRate
+
+    -- 1:many detail — typed ARRAY (unchanged doctrine; the nested response
+    -- OBJECTs stay untyped inside — Snowflake rejects re-casting an already
+    -- typed inner OBJECT, so only the outer ARRAY gets a typed cast here).
+    , AgentChangeCampaign.Responses AS Responses
 FROM AgentChangeCampaign

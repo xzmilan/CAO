@@ -13,9 +13,9 @@ SELECT
     , Survey.Survey:InvitesSent AS InvitesSent
     , Survey.Survey:ResponseCount AS ResponseCount
     , Survey.Survey:ResponseRate AS ResponseRate
-    , Survey.AgentChangeAvgNps:AgentChangeAvgNps AS AgentChangeAvgNps
-    , Survey.AgentChangeMeetsNeedsRate:AgentChangeMeetsNeedsRate AS AgentChangeMeetsNeedsRate
-    , Survey.AgentChangeNoCommsRate:AgentChangeNoCommsRate AS AgentChangeNoCommsRate
-    , Survey.AgentChangeAvgDaysWithoutAgent:AgentChangeAvgDaysWithoutAgent AS AgentChangeAvgDaysWithoutAgent
+    , Survey.SurveyMetrics:AgentChangeAvgNps AS AgentChangeAvgNps
+    , Survey.SurveyMetrics:AgentChangeMeetsNeedsRate AS AgentChangeMeetsNeedsRate
+    , Survey.SurveyMetrics:AgentChangeNoCommsRate AS AgentChangeNoCommsRate
+    , Survey.SurveyMetrics:AgentChangeAvgDaysWithoutAgent AS AgentChangeAvgDaysWithoutAgent
 FROM {{ ref('SurveyWide') }} AS Survey
 WHERE Survey.Survey:SurveyType = 'AGENT_CHANGE'
