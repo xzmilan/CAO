@@ -28,28 +28,28 @@ WITH RankedTransactions AS (
             ORDER BY PolicyTransaction.EFF_DT, PolicyTransaction.SRC_TRANS_TMSP
         ) AS PreviousAgentNumber
     FROM {{ source('rten', 'rten_dim_pl_trn_xlob') }} AS PolicyTransaction
-    
-        WHERE PolicyTransaction.PLCY_CNTRCT_NUM IN (
+
+    WHERE PolicyTransaction.PLCY_CNTRCT_NUM IN (
         -- Signal 1: policies with a transaction newer than the global watermark
-            SELECT DISTINCT PolicyTransactionNew.PLCY_CNTRCT_NUM
-            FROM {{ source('rten', 'rten_dim_pl_trn_xlob') }} AS PolicyTransactionNew
-            WHERE
-                PolicyTransactionNew.SRC_TRANS_TMSP > (
-                    SELECT COALESCE(MAX(ChangeEventRawPrev.SourceTransactionTimestamp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
-                    FROM {{ this }} AS ChangeEventRawPrev
-                )
-            UNION
-            -- Signal 2: policies with NO existing rows in this table at all — first-time
-            -- seen policies must always be scanned, regardless of their transaction
-            -- timestamps relative to the global watermark.
-            SELECT DISTINCT PolicyTransactionAny.PLCY_CNTRCT_NUM
-            FROM {{ source('rten', 'rten_dim_pl_trn_xlob') }} AS PolicyTransactionAny
-            WHERE PolicyTransactionAny.PLCY_CNTRCT_NUM NOT IN (
-                SELECT DISTINCT ChangeEventRawExisting.Rten:PLCY_CNTRCT_NUM::VARCHAR
-                FROM {{ this }} AS ChangeEventRawExisting
+        SELECT DISTINCT PolicyTransactionNew.PLCY_CNTRCT_NUM
+        FROM {{ source('rten', 'rten_dim_pl_trn_xlob') }} AS PolicyTransactionNew
+        WHERE
+            PolicyTransactionNew.SRC_TRANS_TMSP > (
+                SELECT COALESCE(MAX(ChangeEventRawPrev.SourceTransactionTimestamp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
+                FROM {{ this }} AS ChangeEventRawPrev
             )
+        UNION
+        -- Signal 2: policies with NO existing rows in this table at all — first-time
+        -- seen policies must always be scanned, regardless of their transaction
+        -- timestamps relative to the global watermark.
+        SELECT DISTINCT PolicyTransactionAny.PLCY_CNTRCT_NUM
+        FROM {{ source('rten', 'rten_dim_pl_trn_xlob') }} AS PolicyTransactionAny
+        WHERE PolicyTransactionAny.PLCY_CNTRCT_NUM NOT IN (
+            SELECT DISTINCT ChangeEventRawExisting.Rten:PLCY_CNTRCT_NUM::VARCHAR
+            FROM {{ this }} AS ChangeEventRawExisting
         )
-    
+    )
+
 )
 
 , CurrentPolicyStats AS (
@@ -180,7 +180,8 @@ LEFT JOIN {{ ref('PolicyRaw') }} AS PolicyRaw
     ON AllEvents.PLCY_CNTRCT_NUM = PolicyRaw.SystemIds:RtenPlcyCntrctNum
 
 
-    WHERE AllEvents.SourceTransactionTimestamp > (
+WHERE
+    AllEvents.SourceTransactionTimestamp > (
         SELECT COALESCE(MAX(ChangeEventRawPrev.SourceTransactionTimestamp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
         FROM {{ this }} AS ChangeEventRawPrev
     )
