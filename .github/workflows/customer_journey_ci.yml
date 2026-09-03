@@ -18,10 +18,13 @@ name: CustomerJourney dbt CI
 #   compile         — dbt parse: validates Jinja + DAG (broken ref()/source(),
 #                     circular deps) so you find out at PR time, not deploy.
 #
-# Wide-layer regeneration is DEPLOY-TIME ONLY (customer_journey_deploy.yml).
-# The committed wide_layer/*.sql files are non-authoritative documentation —
-# deploy always regenerates them fresh from merged main. This removes the
-# two-PR race condition on auto-generated files entirely.
+# Metric combiners (<entity>_metrics.sql) and wide-layer tables
+# (<Entity>Wide.sql) are NOT committed — they are gitignored and regenerated
+# fresh on the runner from models/metric_layer/<Entity>_Metrics/ (the source
+# of truth) by tools/generate_metrics_combiner.py + generate_wide_layer.py.
+# Both the column-contracts and compile jobs run those generators first, so
+# the file/ref graph they parse is always in sync with the metric files. This
+# removes drift entirely — there is no committed copy to fall out of date.
 #
 # The deploy/build to Snowflake lives in a SEPARATE workflow
 # (customer_journey_deploy.yml, push-to-main only). Keeping it separate means
@@ -184,6 +187,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Generate metric combiners + wide layer (not committed)
+        run: |
+          python3 tools/generate_metrics_combiner.py
+          python3 tools/generate_wide_layer.py
       - name: Column-contract gate (diff-scoped, read-only)
         run: python3 ../../tools/check_column_contracts.py --domain CustomerJourney
 
@@ -205,6 +212,10 @@ jobs:
           python-version: "3.12"
       - name: Install dbt
         run: pip install "dbt-core<2.0" "dbt-snowflake<2.0"
+      - name: Generate metric combiners + wide layer (not committed)
+        run: |
+          python3 tools/generate_metrics_combiner.py
+          python3 tools/generate_wide_layer.py
       - name: dbt parse (validates Jinja + DAG references)
         env:
           DBT_PROFILES_DIR: .

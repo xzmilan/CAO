@@ -13,6 +13,15 @@ logs/
 *.duckdb
 .user.yml
 
+# dbt — metric combiners (<entity>_metrics.sql) and wide-layer tables
+# (<Entity>Wide.sql) are AUTO-GENERATED from models/metric_layer/<Entity>_Metrics/
+# by tools/generate_metrics_combiner.py + tools/generate_wide_layer.py.
+# Never commit these: committing them is exactly how drift vs the metric
+# files happened. They are regenerated fresh on the CI runner (compile job)
+# and at deploy time (customer_journey_deploy.yml).
+**/models/metric_layer/*_metrics.sql
+**/models/wide_layer/*.sql
+
 # OS
 .DS_Store
 
