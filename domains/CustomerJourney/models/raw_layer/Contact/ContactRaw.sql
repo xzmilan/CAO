@@ -123,6 +123,8 @@ WITH ApexContacts AS (
 )
 
 SELECT
+    BASE64_ENCODE(SHA2(ApexContacts.ApexContactId, 256)) AS ID
+
     -- 1:1 identity/address attributes — flat top-level columns, no
     -- wrapping OBJECT.
     , ApexContacts.ContactName AS ContactName
@@ -165,9 +167,7 @@ SELECT
     )::OBJECT(
         ApexContactId VARCHAR
         , ApexAccountId VARCHAR
-    ) AS SystemIdspexAccountId', ApexContacts.ApexAccountId
-        )
-    ) AS Contact
+    ) AS SystemIds
 FROM ApexContacts
 LEFT JOIN ContactEventsByContact
     ON ApexContacts.ApexContactId = ContactEventsByContact.ApexContactId
