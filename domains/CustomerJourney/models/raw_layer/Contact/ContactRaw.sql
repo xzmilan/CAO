@@ -138,7 +138,7 @@ SELECT
 
     -- 1:many detail — typed ARRAY, cast before COALESCE.
     , COALESCE(
-        ContactEventsByContact.ContactEvents::ARRAY(OBJECT(
+        ContactEventsByContact.ContactEvents::ARRAY (OBJECT(
             ContactEventId VARCHAR
             , ContactChannel VARCHAR
             , ContactTimestamp TIMESTAMP_NTZ
@@ -148,7 +148,7 @@ SELECT
             , IsQuoteDiscussed BOOLEAN
             , ContactSources OBJECT(ContactSpace VARCHAR, Livevox VARCHAR, Drips VARCHAR, Sfmc VARCHAR, EaJourney VARCHAR, DbuJourney VARCHAR)
         ))
-        , ARRAY_CONSTRUCT()::ARRAY(OBJECT(
+        , ARRAY_CONSTRUCT()::ARRAY (OBJECT(
             ContactEventId VARCHAR
             , ContactChannel VARCHAR
             , ContactTimestamp TIMESTAMP_NTZ
