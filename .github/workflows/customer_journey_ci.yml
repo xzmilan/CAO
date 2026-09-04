@@ -201,6 +201,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: customer-journey-assembly
+          # upload-artifact strips the LEAST COMMON ANCESTOR of all listed
+          # paths from the archive root (both globs share
+          # domains/CustomerJourney/models/, so that whole prefix is
+          # stripped) — the artifact contains metric_layer/... and
+          # wide_layer/... at its root, NOT the full repo-relative path.
+          # download-artifact steps below must extract back to that same
+          # stripped root (domains/CustomerJourney/models), not
+          # github.workspace, or dbt/the column-contract gate silently
+          # never sees these files (empty ref graph, not an error).
           path: |
             domains/CustomerJourney/models/metric_layer/*_metrics.sql
             domains/CustomerJourney/models/wide_layer/*.sql
@@ -232,7 +241,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: customer-journey-assembly
-          path: ${{ github.workspace }}
+          # Must match the LCA that upload-artifact stripped — see the
+          # comment on the upload step in wide-layer-assembly above.
+          # Anchored to github.workspace explicitly: the action's `path`
+          # input resolves against the workspace root, NOT this job's
+          # `defaults.run.working-directory` (that default only applies to
+          # `run:` shell steps, never to action inputs).
+          path: ${{ github.workspace }}/domains/CustomerJourney/models
       - name: Column-contract gate (diff-scoped, read-only)
         run: python3 ../../tools/check_column_contracts.py --domain CustomerJourney
 
@@ -258,7 +273,15 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: customer-journey-assembly
-          path: ${{ github.workspace }}
+          # Must match the LCA that upload-artifact stripped — see the
+          # comment on the upload step in wide-layer-assembly above. This
+          # exact bug (files landing at workspace/wide_layer/... instead of
+          # workspace/domains/CustomerJourney/models/wide_layer/...) caused
+          # 'depends on a node named PolicyWide which was not found' — dbt
+          # parse doesn't error on a missing FILE, only on a missing REF,
+          # so this failure mode is silent until something actually refs
+          # the model that never made it into the project.
+          path: ${{ github.workspace }}/domains/CustomerJourney/models
       - name: dbt parse (validates Jinja + DAG references)
         env:
           DBT_PROFILES_DIR: .
