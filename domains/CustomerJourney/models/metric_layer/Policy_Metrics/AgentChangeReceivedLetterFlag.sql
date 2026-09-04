@@ -30,4 +30,4 @@ SELECT
     , AgentChangeSurveys.ReceivedLetterFlag AS AgentChangeReceivedLetterFlag
 FROM {{ ref('PolicyRaw') }} AS Policy
 LEFT JOIN AgentChangeSurveys
-    ON Policy.Policy:SystemIds.RtenPlcyCntrctNum = AgentChangeSurveys.PolicyNumber
+    ON Policy.SystemIds:RtenPlcyCntrctNum = AgentChangeSurveys.PolicyNumber
