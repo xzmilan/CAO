@@ -11,10 +11,6 @@
 --           NEVER reads the STG_APEX view (1.76B-row dedup trap) — reads
 --           PRD_BRNZ_APEX.CONTACT directly.
 
-{{ config(
-    pre_hook="ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = 14400"
-) }}
-
 WITH ApexContacts AS (
     -- GRAX archive table: 1.88B rows = ~10 versions per contact.
     -- Dedup to latest non-deleted version per contact ID (182M contacts).

@@ -21,6 +21,10 @@ models:
         +materialized: incremental
         +incremental_strategy: merge
         +unique_key: ID
+      Contact:
+        +materialized: incremental
+        +incremental_strategy: merge
+        +unique_key: ID
     metric_layer:
       +materialized: table
     wide_layer:
