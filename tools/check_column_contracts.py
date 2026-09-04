@@ -514,6 +514,29 @@ def check_star_refs(sql: str, alias_map: dict[str, str], file_path: str) -> list
     """Check for SELECT * or alias.* over ref()s."""
     violations: list[Violation] = []
 
+    # Exempt the two auto-generated layers from NO-STAR-REF:
+    #   - models/wide_layer/*.sql — generate_wide_layer.py's documented,
+    #     zero-maintenance OBJECT_CONSTRUCT(Alias.*) pattern (same exemption
+    #     convention as sql_formatter_snowflake.py's is_generated_wide for LT05).
+    #   - models/metric_layer/<entity>_metrics.sql — the metric COMBINER files
+    #     written by generate_metrics_combiner.py, which do "SELECT * FROM
+    #     {{ ref(metric_name) }}" per metric CTE by design (each individual
+    #     metric file is itself explicit-column; only the combiner's per-CTE
+    #     passthrough uses *). Matched by path (metric_layer/ root, filename
+    #     ends in _metrics.sql) so individual files inside a *_Metrics/
+    #     subfolder are NOT exempted — those still must list columns.
+    # get_contract()'s wildcard resolver already sees through both patterns
+    # for COLUMN-CONTRACT purposes; this exemption only silences the separate
+    # NO-STAR-REF doctrine check for the one designed use of alias.*/SELECT *
+    # in the whole codebase.
+    normalized_path = file_path.replace("\\", "/")
+    is_generated_wide = "wide_layer/" in normalized_path
+    is_metric_combiner = bool(
+        re.search(r"/metric_layer/[A-Za-z0-9_]+_metrics\.sql$", normalized_path)
+    )
+    if is_generated_wide or is_metric_combiner:
+        return violations
+
     # Protect jinja and casts
     sql_no_jinja, _ = _protect_jinja(sql)
     sql_clean, _ = _extract_object_casts(sql_no_jinja)
