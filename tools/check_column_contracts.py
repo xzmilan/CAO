@@ -35,6 +35,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import difflib
 import re
 import subprocess
 import sys
@@ -740,6 +741,13 @@ def _resolve_colon_ref(
     parts = object_path.split(".")
     alias = parts[0]
 
+    def _suggest(word, candidates):
+        """Return " Did you mean: X?" for close matches, else ""."""
+        if not candidates:
+            return ""
+        close = difflib.get_close_matches(word, list(candidates), n=1, cutoff=0.6)
+        return f" Did you mean: {close[0]}?" if close else ""
+
     if len(parts) == 1:
         # Single-segment: Alias:Field — check if field is a top-level column
         if field in contract.columns:
@@ -748,7 +756,8 @@ def _resolve_colon_ref(
         if alias in contract.objects and field in contract.objects[alias]:
             return True, ""
         available = sorted(set(contract.columns) | set(contract.objects.keys()))
-        return False, f"field '{field}' not found in contract (available: {available})"
+        hint = _suggest(field, available)
+        return False, f"field '{field}' not found in contract (available: {available}){hint}"
 
     # Multi-segment: Alias.ObjName or Alias.ObjName.NestedObj
     # parts[1] is the OBJECT name in the contract
@@ -762,12 +771,20 @@ def _resolve_colon_ref(
                 # Found it as a nested object — check field inside it
                 if field in nested[obj_name]:
                     return True, ""
+                avail = sorted(nested[obj_name])
+                close = difflib.get_close_matches(field, avail, n=1, cutoff=0.6)
+                hint = f" Did you mean: {close[0]}?" if close else ""
                 return False, (
                     f"field '{field}' not found in nested object '{obj_name}' "
-                    f"(available: {sorted(nested[obj_name])})"
+                    f"(available: {avail}){hint}"
                 )
         available = sorted(contract.objects.keys())
-        return False, f"object '{obj_name}' not found in {model_name} contract (available: {available})"
+        close = difflib.get_close_matches(obj_name, available, n=1, cutoff=0.6)
+        hint = f" Did you mean: {close[0]}?" if close else ""
+        # Doubled-alias heuristic: Alias.Alias:X is usually a typo for Alias:X.
+        if obj_name == alias:
+            hint = f" Did you mean: drop the extra '{alias}.' (i.e. {alias}:{field})?"
+        return False, f"object '{obj_name}' not found in {model_name} contract (available: {available}){hint}"
 
     # Walk nested chain
     current_fields = contract.objects[obj_name]
@@ -784,10 +801,13 @@ def _resolve_colon_ref(
         # Check if field is a nested object name (e.g. Policy:SystemIds)
         if obj_name in contract.nested_objects and field in contract.nested_objects[obj_name]:
             return True, ""
+        avail = sorted(current_fields)
+        close = difflib.get_close_matches(field, avail, n=1, cutoff=0.6)
+        hint = f" Did you mean: {close[0]}?" if close else ""
         return False, (
             f"field '{field}' not found in '{obj_name}"
             + ("." + ".".join(nested_chain) if nested_chain else "")
-            + f"' (available: {sorted(current_fields)})"
+            + f"' (available: {avail}){hint}"
         )
 
     return True, ""
