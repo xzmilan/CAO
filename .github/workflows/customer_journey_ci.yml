@@ -237,6 +237,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install column-contract gate dependencies
+        # sqlglot lets the gate resolve OBJECT_CONSTRUCT(Alias.*) qualified
+        # wildcards (the wide layer's zero-maintenance pattern) back to the
+        # upstream model's real published contract — without it the gate
+        # falls back to a plain regex match on the same idiom, which is
+        # more brittle. Not required (see the try/except in
+        # check_column_contracts.py), but installing it here means CI
+        # always runs the more precise sqlglot-backed resolution path.
+        run: pip install "sqlglot>=25.0.0,<31.0.0"
       - name: Download assembled models
         uses: actions/download-artifact@v4
         with:
