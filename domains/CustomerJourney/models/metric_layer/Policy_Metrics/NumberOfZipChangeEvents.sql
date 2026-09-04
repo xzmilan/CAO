@@ -18,7 +18,7 @@ WITH ZipChangeCounts AS (
 SELECT
     Policy.ID
     , COALESCE(ZipChangeCounts.NumberOfZipChangeEvents, 0)
-        AS NumberOfZipChangeEvents
+        AS ZipChangeEventCount
 FROM {{ ref('PolicyRaw') }} AS Policy
 LEFT JOIN ZipChangeCounts
     ON Policy.ID = ZipChangeCounts.PolicyID
