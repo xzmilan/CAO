@@ -49,6 +49,18 @@ sys.path.insert(0, str(TOOLS_DIR))
 from sql_formatter_snowflake import _extract_object_casts, _protect_jinja  # noqa: E402
 from rule_help import print_help_for_rules  # noqa: E402
 
+# sqlglot is optional — this gate must never hard-crash in an environment
+# where it isn't installed yet (mirrors the try/except pattern already used
+# by mesa-governance-api's grain_guard.py / sql_parser.py / gold_decompose.py
+# for this exact class of problem). When unavailable, wildcard detection
+# falls back to a plain regex match on the same textual idiom.
+try:
+    import sqlglot
+    import sqlglot.expressions as sqlglot_exp
+    _SQLGLOT_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _SQLGLOT_AVAILABLE = False
+
 # ── Regexes ──────────────────────────────────────────────────────────────────
 # ref('Name') or ref("Name") — capture the model name
 _REF_RE = re.compile(r"\{\{\s*ref\(\s*['\"]([\w]+)['\"]\s*\)\s*\}\}")
@@ -106,6 +118,23 @@ _COMMENT_LINE_RE = re.compile(r"^\s*--")
 
 # dbt config block — strip before parsing
 _CONFIG_BLOCK_RE = re.compile(r"^\s*\{\{\s*config\s*\(.*?\)\s*\}\}", re.DOTALL)
+
+# Regex fallback for detecting OBJECT_CONSTRUCT(Alias.*) AS Name — used when
+# sqlglot is unavailable or fails to parse. sqlglot recognizes this Snowflake
+# idiom natively as exp.StarMap; this is only the textual backstop.
+_WILDCARD_OBJECT_FALLBACK_RE = re.compile(
+    r"OBJECT_CONSTRUCT\s*\(\s*([A-Za-z_]\w*)\.\s*\*\s*\)\s*AS\s+([A-Za-z_]\w*)",
+    re.IGNORECASE,
+)
+
+# Jinja -> bare-SQL stubs so sqlglot can parse dbt models (mirrors
+# mesa-governance-api/api/services/grain_guard.py's _strip_jinja technique).
+_JINJA_REF_STUB_RE = re.compile(r"\{\{\s*ref\(\s*['\"]([\w]+)['\"]\s*\)\s*\}\}")
+_JINJA_SOURCE_STUB_RE = re.compile(
+    r"\{\{\s*source\(\s*['\"]([\w]+)['\"]\s*,\s*['\"]([\w]+)['\"]\s*\)\s*\}\}"
+)
+_JINJA_THIS_STUB_RE = re.compile(r"\{\{\s*this\s*\}\}")
+_JINJA_GENERIC_RE = re.compile(r"\{\{.*?\}\}", re.DOTALL)
 
 
 # ── Data structures ──────────────────────────────────────────────────────────
@@ -441,6 +470,126 @@ def published_contract(sql: str, model_name: str) -> Contract:
     return contract
 
 
+# ── Step 4d: Wildcard OBJECT passthroughs (OBJECT_CONSTRUCT(Alias.*) AS Name) ─
+#
+# The wide layer's zero-maintenance design (generate_wide_layer.py) writes
+# OBJECT_CONSTRUCT(Policy.*) AS Policy instead of listing fields — Snowflake's
+# qualified-wildcard idiom. published_contract()'s cast/AS-alias extraction
+# above can't see through a wildcard argument, so without this step
+# PolicyWide's "Policy" object would resolve to an empty contract and every
+# downstream Policy.Policy:<Field> reference would silently go unchecked
+# (this is exactly how a PolicyRaw.BusinessEntity rename slipped through
+# undetected in testing). This step marks each wildcard target as a
+# passthrough pointing at its source alias's upstream model name; the lazy
+# resolver below (get_contract) expands it into that upstream model's full
+# contract (its own columns AND its own objects) on demand.
+
+def find_wildcard_passthroughs(sql: str, alias_map: dict[str, str]) -> dict[str, str]:
+    """
+    Detect OBJECT_CONSTRUCT(<alias>.*) AS <name> in a model's SELECT.
+    Returns {output_object_name: upstream_model_name} for each wildcard found,
+    resolving <alias> through alias_map (FROM/JOIN ref() aliases).
+
+    Prefers sqlglot (recognizes this Snowflake idiom as exp.StarMap — no
+    regex guessing about parens/whitespace); falls back to a plain regex
+    scan if sqlglot is unavailable or fails to parse this file.
+    """
+    passthroughs: dict[str, str] = {}
+
+    if _SQLGLOT_AVAILABLE:
+        stubbed = _JINJA_REF_STUB_RE.sub(lambda m: m.group(1), sql)
+        stubbed = _JINJA_SOURCE_STUB_RE.sub(lambda m: f"{m.group(1)}_{m.group(2)}", stubbed)
+        stubbed = _JINJA_THIS_STUB_RE.sub("__THIS__", stubbed)
+        stubbed = _JINJA_GENERIC_RE.sub("", stubbed)
+        try:
+            tree = sqlglot.parse_one(stubbed, dialect="snowflake")
+        except Exception:
+            tree = None
+        if tree is not None:
+            for alias_node in tree.find_all(sqlglot_exp.Alias):
+                star_map = alias_node.this
+                if not isinstance(star_map, sqlglot_exp.StarMap):
+                    continue
+                out_name = alias_node.alias
+                col = star_map.find(sqlglot_exp.Column)
+                if col is None or not out_name:
+                    continue
+                source_alias = col.table or col.this.name
+                upstream_model = alias_map.get(source_alias)
+                if upstream_model:
+                    passthroughs[out_name] = upstream_model
+            return passthroughs
+
+    # Regex fallback (sqlglot missing or parse failed)
+    for m in _WILDCARD_OBJECT_FALLBACK_RE.finditer(sql):
+        source_alias, out_name = m.group(1), m.group(2)
+        upstream_model = alias_map.get(source_alias)
+        if upstream_model:
+            passthroughs[out_name] = upstream_model
+    return passthroughs
+
+
+def get_contract(
+    model_name: str,
+    models: dict[str, Path],
+    cache: dict[str, "Contract"],
+    _resolving: frozenset[str] = frozenset(),
+) -> "Contract | None":
+    """
+    Lazily compute and memoize a model's published contract, recursively
+    resolving any OBJECT_CONSTRUCT(alias.*) wildcard passthroughs it
+    contains against ITS upstream models' contracts.
+
+    Unlike the pre-computed `contracts` dict in validate() (built only for
+    models changed in this PR), this resolves ANY model on demand — needed
+    because a wildcard's upstream (e.g. PolicyRaw behind PolicyWide's
+    OBJECT_CONSTRUCT(Policy.*)) may not itself be "changed" in the current
+    diff. `_resolving` guards against infinite recursion on a ref() cycle
+    (returns None for a model already on the current resolution path,
+    treated as an unresolvable/opaque contract rather than raising).
+    """
+    if model_name in cache:
+        return cache[model_name]
+    if model_name in _resolving or model_name not in models:
+        return None
+
+    sql = models[model_name].read_text()
+    sql = _CONFIG_BLOCK_RE.sub("", sql)
+    contract = published_contract(sql, model_name)
+    alias_map = _build_alias_map(sql)
+
+    wildcards = find_wildcard_passthroughs(sql, alias_map)
+    for obj_name, upstream_name in wildcards.items():
+        upstream_contract = get_contract(
+            upstream_name, models, cache, _resolving | {model_name}
+        )
+        if upstream_contract is None:
+            continue
+        # published_contract()'s plain-AS-alias step (4c) doesn't recognize
+        # OBJECT_CONSTRUCT(Alias.*) AS Name as an object passthrough — the
+        # wildcard is buried inside a function call, not a bare dotted ref —
+        # so it misclassifies the wildcard's output name as a scalar column.
+        # Undo that misclassification before installing the real, resolved
+        # object contract below.
+        contract.columns.discard(obj_name)
+        # A wildcard-expanded object inherits the upstream model's own
+        # top-level columns as its fields, AND the upstream's own objects
+        # as nested objects (e.g. PolicyWide.Policy:SystemIds:RtenPlcyCntrctNum
+        # resolves through PolicyRaw's SystemIds object).
+        contract.objects[obj_name] = set(upstream_contract.columns) | set(
+            upstream_contract.objects.keys()
+        )
+        contract.nested_objects[obj_name] = {
+            nested_name: set(nested_fields)
+            for nested_name, nested_fields in upstream_contract.objects.items()
+        }
+        for nested_name, nested_map in upstream_contract.nested_objects.items():
+            contract.nested_objects[obj_name].setdefault(nested_name, set())
+
+    cache[model_name] = contract
+    return contract
+
+
 # ── Step 5: Consumed references ──────────────────────────────────────────────
 
 def _build_alias_map(sql: str) -> dict[str, str]:
@@ -658,13 +807,26 @@ def validate(
     violations: list[Violation] = []
     all_warnings: list[str] = []
 
-    # Compute published contracts for changed models
+    # Shared memoization cache for get_contract(): every model's contract is
+    # computed at most once, however many times it's reached (as a changed
+    # model, a wildcard's upstream, or a passthrough's upstream).
+    contract_cache: dict[str, Contract] = {}
+
+    # Compute published contracts for changed models via the lazy resolver —
+    # this also resolves any OBJECT_CONSTRUCT(alias.*) wildcard passthroughs
+    # a changed model contains (e.g. PolicyWide.Policy) against ITS upstream
+    # model's real contract (e.g. PolicyRaw), even when that upstream wasn't
+    # itself changed in this PR. Without this, a wide-layer wildcard's object
+    # resolves empty and every downstream Alias.Object:Field reference through
+    # it goes unchecked — this is exactly how a PolicyRaw column rename slipped
+    # past the gate silently before this fix.
     contracts: dict[str, Contract] = {}
     for model_name in changed:
         if model_name not in models:
             continue
-        sql = models[model_name].read_text()
-        contract = published_contract(sql, model_name)
+        contract = get_contract(model_name, models, contract_cache)
+        if contract is None:
+            continue
         contracts[model_name] = contract
         all_warnings.extend(contract.warnings)
 
@@ -686,17 +848,16 @@ def validate(
             alias_map = _build_alias_map(sql)
             # Look for "Alias.ObjectName AS ObjectName" pattern
             for alias, upstream_name in alias_map.items():
-                if upstream_name in contracts:
-                    upstream_contract = contracts[upstream_name]
-                    if obj_name in upstream_contract.objects:
-                        # Copy fields from upstream
-                        contract.objects[obj_name] = set(upstream_contract.objects[obj_name])
-                        # Also copy nested objects
-                        if obj_name in upstream_contract.nested_objects:
-                            contract.nested_objects[obj_name] = dict(
-                                upstream_contract.nested_objects[obj_name]
-                            )
-                        break
+                upstream_contract = get_contract(upstream_name, models, contract_cache)
+                if upstream_contract is not None and obj_name in upstream_contract.objects:
+                    # Copy fields from upstream
+                    contract.objects[obj_name] = set(upstream_contract.objects[obj_name])
+                    # Also copy nested objects
+                    if obj_name in upstream_contract.nested_objects:
+                        contract.nested_objects[obj_name] = dict(
+                            upstream_contract.nested_objects[obj_name]
+                        )
+                    break
 
     # For each consumer, check its references against changed upstream contracts
     for consumer_name in consumers:
