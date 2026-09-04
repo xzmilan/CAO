@@ -8,11 +8,6 @@
 -- Campaign wave = invite month.
 
 SELECT
-    Survey.Survey:SurveyType AS SurveyType
-    , Survey.Survey:InviteWave AS InviteWave
-    , Survey.Survey:InvitesSent AS InvitesSent
-    , Survey.Survey:ResponseCount AS ResponseCount
-    , Survey.Survey:ResponseRate AS ResponseRate
-    , Survey.SurveyMetrics:RnpsAvgNps AS RnpsAvgNps
+    Survey.*
 FROM {{ ref('SurveyWide') }} AS Survey
 WHERE Survey.Survey:SurveyType = 'RNPS'

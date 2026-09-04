@@ -108,7 +108,7 @@ SELECT
         , 'LastTransactionTmsp', CAST(LatestTransaction.LatestTransactionTimestamp AS VARCHAR)
         , 'LastPolicyStatsTmsp', CAST(PolicyStats.SRC_TRANS_TMSP AS VARCHAR)
     )::OBJECT(
-        RtenPlcyCntrctNum VARCHAR
+        RtenPlcyCntrctNumRenamed VARCHAR
         , FdrPlcyNum VARCHAR
         , LastTransactionTmsp VARCHAR
         , LastPolicyStatsTmsp VARCHAR
