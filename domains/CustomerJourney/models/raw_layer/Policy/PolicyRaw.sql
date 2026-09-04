@@ -90,7 +90,7 @@ SELECT
 
     -- 1:1 business attributes — flat top-level columns, no wrapping OBJECT.
     , Policy.BUS_ENTITY AS BusinessUnit
-    , Policy.LOB_TYP_CD AS LineOfBusinessCode
+    , Policy.LOB_TYP_CD AS LineOfBusines
     , Policy.PLCY_ST_CD AS PolicyStateCode
     , CAST(Policy.PLCY_CNTRCT_NUM AS VARCHAR) AS PolicyNumber
     , Policy.SRVD_CHNL_CD AS ServiceChannelCode
