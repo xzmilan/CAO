@@ -21,10 +21,16 @@ models:
         +materialized: incremental
         +incremental_strategy: merge
         +unique_key: ID
-      Contact:
-        +materialized: incremental
-        +incremental_strategy: merge
-        +unique_key: ID
+      # Contact: kept as `table` (falls through to the raw_layer default
+      # above) until ContactEventsByContact's join (currently a placeholder
+      # `ON FALSE` in ContactRaw.sql, join key TBD) is diagnosed. The
+      # is_incremental() watermark guard already exists in ContactRaw.sql
+      # (LASTMODIFIEDDATE, unverified against prod) — flip this block back
+      # on when the join is fixed, no SQL changes needed at that point.
+      # Contact:
+      #   +materialized: incremental
+      #   +incremental_strategy: merge
+      #   +unique_key: ID
     metric_layer:
       +materialized: table
     wide_layer:

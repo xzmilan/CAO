@@ -25,11 +25,13 @@ WITH LatestTransaction AS (
         , PolicyTransaction.SRC_TRANS_TMSP AS LatestTransactionTimestamp
     FROM {{ source('rten', 'rten_dim_pl_trn_xlob') }} AS PolicyTransaction
 
+    {% if is_incremental() %}
     WHERE
         PolicyTransaction.SRC_TRANS_TMSP > (
             SELECT COALESCE(MAX(PolicyRawPrev.SystemIds:LastTransactionTmsp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
             FROM {{ this }} AS PolicyRawPrev
         )
+    {% endif %}
 
     QUALIFY ROW_NUMBER() OVER (
         PARTITION BY PolicyTransaction.PLCY_CNTRCT_NUM
@@ -54,6 +56,7 @@ WITH LatestTransaction AS (
     WHERE
         PolicyStats.END_DT_TMSP = '2999-12-31'::TIMESTAMP_NTZ
 
+        {% if is_incremental() %}
         AND PolicyStats.PLCY_NUM IN (
             SELECT DISTINCT PolicyStatsNew.PLCY_NUM
             FROM {{ source('fdr', 'fdr_mdm_plcy_stats') }} AS PolicyStatsNew
@@ -62,6 +65,7 @@ WITH LatestTransaction AS (
                 FROM {{ this }} AS PolicyRawPrev
             )
         )
+        {% endif %}
 
     QUALIFY ROW_NUMBER() OVER (
         PARTITION BY PolicyStats.PLCY_NUM

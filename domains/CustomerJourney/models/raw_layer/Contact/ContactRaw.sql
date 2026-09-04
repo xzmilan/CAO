@@ -10,6 +10,15 @@
 --           THIS ENTITY IS THE CONTRACT for all contact data.
 --           NEVER reads the STG_APEX view (1.76B-row dedup trap) — reads
 --           PRD_BRNZ_APEX.CONTACT directly.
+-- Incremental watermark: LASTMODIFIEDDATE, guarded by is_incremental() below
+--           (best-effort — NOT yet verified against prod the way
+--           Policy/ChangeEvent/Survey's watermark columns were). Disabled
+--           for now via dbt_project.yml (materialized: table, commented-out
+--           incremental block preserved) until the ContactEventsByContact
+--           join (currently a placeholder `ON FALSE`, join key TBD) is
+--           diagnosed — see TODO below. The guard is left in place so
+--           flipping dbt_project.yml back to incremental later doesn't
+--           ALSO require re-adding this.
 
 WITH ApexContacts AS (
     -- GRAX archive table: 1.88B rows = ~10 versions per contact.
@@ -28,6 +37,12 @@ WITH ApexContacts AS (
         , ApexContact.LASTMODIFIEDDATE AS LastModifiedDate
     FROM {{ source('brnz_apex', 'contact') }} AS ApexContact
     WHERE ApexContact.ISDELETED = FALSE
+    {% if is_incremental() %}
+    AND ApexContact.LASTMODIFIEDDATE > (
+        SELECT COALESCE(MAX(ContactRawPrev.LastModifiedDate::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
+        FROM {{ this }} AS ContactRawPrev
+    )
+    {% endif %}
     QUALIFY ROW_NUMBER() OVER (
         PARTITION BY ApexContact.ID
         ORDER BY ApexContact.GRAX__IDSEQ DESC

@@ -67,7 +67,19 @@ _FROM_JOIN_REF_RE = re.compile(
 
 
 # ── Jinja protection (identical technique to MESA) ───────────────────────────
-_JINJA_RE = re.compile(r"\{\{.*?\}\}", re.DOTALL)
+# Protects BOTH Jinja tag families:
+#   {{ ... }}  expression tags (ref(), source(), this, config(), vars, etc.)
+#   {% ... %}  statement/control-flow tags (if/endif/for/endfor/set, etc.)
+#
+# Missing the {% %} half is not a cosmetic gap — it's a correctness bug that
+# actually happened in production here: sqlfluff's fix pass doesn't
+# understand Jinja at all, so an unprotected `{% if is_incremental() %}` /
+# `{% endif %}` pair around a watermark WHERE clause got silently stripped
+# by the auto-fix job (tools/fix_all.py), turning incremental-only logic
+# into logic that runs unconditionally on every build, including the very
+# first run / a full-refresh where {{ this }} doesn't exist yet. Both tag
+# families MUST be protected before any sqlfluff pass touches the SQL.
+_JINJA_RE = re.compile(r"\{\{.*?\}\}|\{%.*?%\}", re.DOTALL)
 _JINJA_PLACEHOLDER = "JINJA_PLACEHOLDER__{idx}__"
 _JINJA_PLACEHOLDER_RE = re.compile(r"JINJA_PLACEHOLDER__(\d+)__")
 

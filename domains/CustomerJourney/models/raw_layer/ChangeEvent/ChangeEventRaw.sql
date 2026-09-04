@@ -29,6 +29,7 @@ WITH RankedTransactions AS (
         ) AS PreviousAgentNumber
     FROM {{ source('rten', 'rten_dim_pl_trn_xlob') }} AS PolicyTransaction
 
+    {% if is_incremental() %}
     WHERE PolicyTransaction.PLCY_CNTRCT_NUM IN (
         -- Signal 1: policies with a transaction newer than the global watermark
         SELECT DISTINCT PolicyTransactionNew.PLCY_CNTRCT_NUM
@@ -49,6 +50,7 @@ WITH RankedTransactions AS (
             FROM {{ this }} AS ChangeEventRawExisting
         )
     )
+    {% endif %}
 
 )
 
@@ -179,12 +181,13 @@ LEFT JOIN CurrentPolicyStats AS PolicyStats
 LEFT JOIN {{ ref('PolicyRaw') }} AS PolicyRaw
     ON AllEvents.PLCY_CNTRCT_NUM = PolicyRaw.SystemIds:RtenPlcyCntrctNum
 
-
+{% if is_incremental() %}
 WHERE
     AllEvents.SourceTransactionTimestamp > (
         SELECT COALESCE(MAX(ChangeEventRawPrev.SourceTransactionTimestamp::TIMESTAMP_NTZ), '1900-01-01'::TIMESTAMP_NTZ)
         FROM {{ this }} AS ChangeEventRawPrev
     )
+{% endif %}
 
 
 /*

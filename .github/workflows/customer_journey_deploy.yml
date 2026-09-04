@@ -38,8 +38,11 @@ name: CustomerJourney dbt Deploy
 # Need to monitor table update schedule and adjust cron if necessary.
 
 on:
-  schedule:
-    - cron: "0 12 * * *"   # 7:00 AM ET (EST, UTC-5) — see CRON NOTE above
+  # Scheduled nightly cron DISABLED (2026-09-04) — deploy is manual-only for
+  # now via workflow_dispatch below. Uncomment the `schedule:` block to
+  # re-enable the automatic 7am ET run once ready to resume nightly deploys.
+  # schedule:
+  #   - cron: "0 12 * * *"   # 7:00 AM ET (EST, UTC-5) — see CRON NOTE above
   workflow_dispatch: {}   # allow manual trigger from the Actions tab
 
 defaults:
