@@ -163,30 +163,89 @@ def _short_path(rel_path: str) -> str:
     return normalized[idx + len(marker):]
 
 
+# "... (available: [...]) Did you mean: X?" — captures the "Did you mean"
+# tail (optional) so it can print on its own line, and strips the
+# "(available: [...])" list entirely (noise once did_you_mean is shown).
+_REASON_TAIL_RE = re.compile(
+    r"\s*\(available:.*?\)(?:\s*(Did you mean:.*?\?))?\s*$"
+)
+
+
+def _split_reason(reason: str) -> tuple[str, str]:
+    """
+    Split a _resolve_colon_ref() reason string into (core_reason, did_you_mean).
+    "field 'X' not found in 'Obj' (available: [...]) Did you mean: Y?" becomes
+    ("field 'X' not found in 'Obj'", "Did you mean: Y?").
+    If there's no "(available: ...)" tail, or no "Did you mean", the missing
+    piece is returned as "".
+    """
+    m = _REASON_TAIL_RE.search(reason)
+    if not m:
+        return reason, ""
+    core = reason[:m.start()]
+    did_you_mean = m.group(1) or ""
+    return core, did_you_mean
+
+
+# Layer buckets for the "This Error Affects The Following Objects" section —
+# printed in this fixed order (Views first — they're what a BI consumer
+# actually sees break — then Metrics, then Raw) regardless of how many
+# violations land in each bucket, including zero.
+_LAYER_ORDER = ("Views", "Metrics", "Raw")
+
+
+def _categorize_layer(short_path: str) -> str:
+    """
+    Map a model's short path (already stripped of 'domains/<Domain>/models/'
+    by _short_path) to its layer bucket for grouping violations by
+    consumer type: view_layer/ -> Views, metric_layer/ -> Metrics,
+    raw_layer/ -> Raw. wide_layer/ consumers fall back to "Metrics" (the
+    wide table is the metrics/raw assembly point, not a BI-facing view).
+    """
+    if short_path.startswith("view_layer/"):
+        return "Views"
+    if short_path.startswith("metric_layer/"):
+        return "Metrics"
+    if short_path.startswith("raw_layer/"):
+        return "Raw"
+    return "Metrics"
+
+
 # ── Data structures ──────────────────────────────────────────────────────────
 
 class Violation:
     """
     A single contract violation.
 
-    `headline` is the short, human-readable root cause shared by every
-    consumer hitting the exact same broken reference (e.g. "SystemIds:
-    RtenPlcyCntrctNum no longer exists in PolicyRaw") — used to GROUP
-    violations so 20 consumers of the same rename print once, not 20 times.
-    `detail` is the optional "available fields / did you mean" tail that's
-    identical across the whole group, so it's also printed once per group
-    instead of once per line.
+    Violations are printed grouped by root cause, not one block per
+    consumer file — 20 consumers of the exact same rename print as ONE
+    group. The group identity is (`upstream`, `ref_desc`, `did_you_mean`):
+
+      upstream       the model that broke the contract, e.g. "PolicyWide"
+                      (its own line, printed once per group)
+      ref_desc       the broken reference + reason, e.g.
+                      "Policy.Policy:BusinessEntity — field 'BusinessEntity'
+                      not found in 'Policy'" (second line, once per group)
+      did_you_mean   the "Did you mean: X?" suggestion, or "" if none
+                      (third line, once per group, omitted if empty)
+
+    The "available: [...]" field list is intentionally NOT stored/printed —
+    it's noise once `did_you_mean` already points at the likely fix.
+    `message` is kept as the original one-line message for anything that
+    still wants the flat form (e.g. warnings/back-compat), unused by the
+    grouped printer.
     """
     def __init__(
         self, file: str, line: int, message: str, rule: str,
-        headline: str | None = None, detail: str = "",
+        upstream: str = "", ref_desc: str | None = None, did_you_mean: str = "",
     ):
         self.file = file
         self.line = line
         self.message = message
         self.rule = rule
-        self.headline = headline if headline is not None else message
-        self.detail = detail
+        self.upstream = upstream
+        self.ref_desc = ref_desc if ref_desc is not None else message
+        self.did_you_mean = did_you_mean
 
 
 class Contract:
@@ -748,7 +807,8 @@ def check_star_refs(sql: str, alias_map: dict[str, str], file_path: str) -> list
                                 f"(CAO doctrine: explicit column lists make downstream "
                                 f"impact verifiable). List the columns.",
                         rule="NO-STAR-REF",
-                        headline=f"{alias}.* over ref('{alias_map[alias]}')",
+                        upstream=alias_map[alias],
+                        ref_desc=f"{alias}.* over ref('{alias_map[alias]}') is banned",
                     ))
             else:
                 # SELECT * — check if this model has ANY ref()
@@ -760,7 +820,8 @@ def check_star_refs(sql: str, alias_map: dict[str, str], file_path: str) -> list
                                 "(CAO doctrine: explicit column lists make downstream "
                                 "impact verifiable). List the columns.",
                         rule="NO-STAR-REF",
-                        headline="SELECT * in a model with ref()s",
+                        upstream="(multiple)",
+                        ref_desc="SELECT * in a model with ref()s is banned",
                     ))
 
     return violations
@@ -962,33 +1023,36 @@ def validate(
                 # Colon ref
                 valid, reason = _resolve_colon_ref(object_path, field, contract, upstream)
                 if not valid:
-                    # Split "field 'X' not found ... (available: [...]) Did you
-                    # mean: Y?" into a short headline (what broke, grouped
-                    # across every consumer) and a detail tail (the available
-                    # list + hint, printed once per group instead of once
-                    # per consumer file).
-                    headline_reason, _, detail_tail = reason.partition(" (available:")
-                    detail = ("(available:" + detail_tail) if detail_tail else ""
+                    # reason looks like: "field 'X' not found in 'Obj'
+                    # (available: [...]) Did you mean: Y?" — strip the
+                    # "(available: [...])" list (noise once did_you_mean
+                    # points at the fix) and pull "Did you mean: Y?" out into
+                    # its own field so it always prints on its own line.
+                    core_reason, did_you_mean = _split_reason(reason)
                     violations.append(Violation(
                         file=rel_path,
                         line=line_num,
                         message=f"{object_path}:{field} — {upstream} {reason}",
                         rule="COLUMN-CONTRACT",
-                        headline=f"{upstream} {object_path}:{field} — {headline_reason}",
-                        detail=detail,
+                        upstream=upstream,
+                        ref_desc=f"{object_path}:{field} — {core_reason}",
+                        did_you_mean=did_you_mean,
                     ))
             else:
                 # Plain column ref
                 if field not in contract.columns and field not in contract.objects:
                     available = sorted(set(contract.columns) | set(contract.objects.keys()))
+                    close = difflib.get_close_matches(field, available, n=1, cutoff=0.6)
+                    did_you_mean = f"Did you mean: {close[0]}?" if close else ""
                     violations.append(Violation(
                         file=rel_path,
                         line=line_num,
                         message=f"{field} — {upstream} no longer publishes column '{field}' "
                                 f"(available: {available})",
                         rule="COLUMN-CONTRACT",
-                        headline=f"{upstream}.{field} — no longer published",
-                        detail=f"(available: {available})",
+                        upstream=upstream,
+                        ref_desc=f"{field} — no longer published",
+                        did_you_mean=did_you_mean,
                     ))
 
     return violations, all_warnings
@@ -1048,12 +1112,14 @@ def main() -> int:
         for w in warnings:
             print(f"  {w}")
 
-    # Print violations — grouped by rule, then by root cause (headline), so
-    # N consumers hitting the exact same broken rename print as ONE group
-    # with a shared explanation, not N nearly-identical blocks each repeating
-    # the same "available fields" list. This is what actually makes a
-    # 20-violation run readable: the rename happened ONCE, so the report
-    # should say that once too.
+    # Print violations — grouped by rule, then by the model that broke the
+    # contract (upstream), then by the exact broken reference (ref_desc +
+    # did_you_mean). N consumers hitting the exact same broken rename print
+    # as ONE group instead of N nearly-identical blocks — the rename
+    # happened ONCE, so the report says that once too. Consumers within a
+    # group are then bucketed into "This Error Affects The Following
+    # Objects" -> Views / Metrics / Raw (in that fixed order), each bucket
+    # listing its files together instead of interleaved.
     if violations:
         print(f"\nVIOLATIONS ({len(violations)} total):\n")
 
@@ -1068,21 +1134,39 @@ def main() -> int:
             print(f"{header} — {len(rule_violations)} violation(s)")
             print("-" * len(header))
 
-            by_headline: dict[str, list[Violation]] = defaultdict(list)
+            by_upstream: dict[str, list[Violation]] = defaultdict(list)
             for v in rule_violations:
-                by_headline[v.headline].append(v)
+                by_upstream[v.upstream].append(v)
 
-            for headline in sorted(by_headline):
-                group = by_headline[headline]
-                print(f"\n  {headline}")
-                if group[0].detail:
-                    print(f"    {group[0].detail}")
-                locations = sorted(
-                    f"{_short_path(v.file)}:L{v.line}" for v in group
-                )
-                for loc in locations:
-                    print(f"      {loc}")
-            print()
+            for upstream in sorted(by_upstream):
+                upstream_violations = by_upstream[upstream]
+
+                by_ref: dict[tuple[str, str], list[Violation]] = defaultdict(list)
+                for v in upstream_violations:
+                    by_ref[(v.ref_desc, v.did_you_mean)].append(v)
+
+                print(f"\n{upstream}")
+                for (ref_desc, did_you_mean), group in sorted(by_ref.items()):
+                    print(f"      {ref_desc}")
+                    if did_you_mean:
+                        print(f"      {did_you_mean}")
+
+                    by_layer: dict[str, list[Violation]] = defaultdict(list)
+                    for v in group:
+                        by_layer[_categorize_layer(_short_path(v.file))].append(v)
+
+                    print(f"\n      This Error Affects The Following Objects")
+                    for layer in _LAYER_ORDER:
+                        layer_violations = by_layer.get(layer)
+                        if not layer_violations:
+                            continue
+                        print(f"      {layer}")
+                        entries = sorted(
+                            (Path(v.file).name, v.line) for v in layer_violations
+                        )
+                        for filename, line_num in entries:
+                            print(f"               {filename} (Line {line_num})")
+                    print()
 
         print(f"SUMMARY: {len(violations)} violations, {len(warnings)} warnings across "
               f"{len(set(v.file for v in violations))} file(s)")
