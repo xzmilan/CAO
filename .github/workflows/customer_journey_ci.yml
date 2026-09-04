@@ -106,13 +106,13 @@ jobs:
       run:
         working-directory: ${{ github.workspace }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Check out the PR head branch by name (not the detached merge ref)
           # and fetch full history, so the push below is a clean fast-forward.
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install linting dependencies
@@ -168,8 +168,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: auto-fix
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install linting dependencies
@@ -189,8 +189,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Generate metric combiners + wide layer (not committed)
@@ -198,7 +198,7 @@ jobs:
           python3 tools/generate_metrics_combiner.py
           python3 tools/generate_wide_layer.py
       - name: Upload assembled models
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: customer-journey-assembly
           # upload-artifact strips the LEAST COMMON ANCESTOR of all listed
@@ -231,10 +231,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: wide-layer-assembly
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install column-contract gate dependencies
@@ -247,7 +247,7 @@ jobs:
         # always runs the more precise sqlglot-backed resolution path.
         run: pip install "sqlglot>=25.0.0,<31.0.0"
       - name: Download assembled models
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: customer-journey-assembly
           # Must match the LCA that upload-artifact stripped — see the
@@ -272,14 +272,14 @@ jobs:
     runs-on: ubuntu-latest
     needs: column-contracts
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install dbt
         run: pip install "dbt-core<2.0" "dbt-snowflake<2.0"
       - name: Download assembled models
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: customer-journey-assembly
           # Must match the LCA that upload-artifact stripped — see the
