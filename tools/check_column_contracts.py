@@ -187,6 +187,28 @@ def _split_reason(reason: str) -> tuple[str, str]:
     return core, did_you_mean
 
 
+# Pulls the suggested replacement name out of a "Did you mean: X?" string —
+# used to phrase the same suggestion as a direct "PR Changed Field <old> TO
+# <new>" statement, which reads as a plain fact instead of a question.
+_DID_YOU_MEAN_NAME_RE = re.compile(r"Did you mean:\s*(.+?)\s*\?\s*$")
+
+
+def _pr_changed_field_line(old_field: str, did_you_mean: str) -> str:
+    """
+    Build "PR Changed Field <old> TO <new>" from the original field name a
+    consumer still references and the gate's own "Did you mean: <new>?"
+    suggestion. Returns "" when there's no suggestion (nothing to rename to)
+    or the "drop the extra alias" doubled-alias hint (not a rename at all).
+    """
+    if not did_you_mean or "drop the extra" in did_you_mean:
+        return ""
+    m = _DID_YOU_MEAN_NAME_RE.search(did_you_mean)
+    if not m:
+        return ""
+    new_field = m.group(1)
+    return f"PR Changed Field {old_field} TO {new_field}"
+
+
 # Layer buckets for the "This Error Affects The Following Objects" section —
 # printed in this fixed order (Views first — they're what a BI consumer
 # actually sees break — then Metrics, then Raw) regardless of how many
@@ -229,6 +251,11 @@ class Violation:
       did_you_mean   the "Did you mean: X?" suggestion, or "" if none
                       (third line, once per group, omitted if empty)
 
+    `pr_changed_field` restates did_you_mean as a plain fact instead of a
+    question — "PR Changed Field BusinessEntity TO BusinessUnit" — printed
+    between ref_desc and did_you_mean. "" when there's no rename to name
+    (e.g. NO-STAR-REF, or a field removed with nothing to suggest).
+
     The "available: [...]" field list is intentionally NOT stored/printed —
     it's noise once `did_you_mean` already points at the likely fix.
     `message` is kept as the original one-line message for anything that
@@ -238,6 +265,7 @@ class Violation:
     def __init__(
         self, file: str, line: int, message: str, rule: str,
         upstream: str = "", ref_desc: str | None = None, did_you_mean: str = "",
+        pr_changed_field: str = "",
     ):
         self.file = file
         self.line = line
@@ -246,6 +274,7 @@ class Violation:
         self.upstream = upstream
         self.ref_desc = ref_desc if ref_desc is not None else message
         self.did_you_mean = did_you_mean
+        self.pr_changed_field = pr_changed_field
 
 
 class Contract:
@@ -1037,6 +1066,7 @@ def validate(
                         upstream=upstream,
                         ref_desc=f"{object_path}:{field} — {core_reason}",
                         did_you_mean=did_you_mean,
+                        pr_changed_field=_pr_changed_field_line(field, did_you_mean),
                     ))
             else:
                 # Plain column ref
@@ -1053,6 +1083,7 @@ def validate(
                         upstream=upstream,
                         ref_desc=f"{field} — no longer published",
                         did_you_mean=did_you_mean,
+                        pr_changed_field=_pr_changed_field_line(field, did_you_mean),
                     ))
 
     return violations, all_warnings
@@ -1141,12 +1172,12 @@ def main() -> int:
             for upstream in sorted(by_upstream):
                 upstream_violations = by_upstream[upstream]
 
-                by_ref: dict[tuple[str, str], list[Violation]] = defaultdict(list)
+                by_ref: dict[tuple[str, str, str], list[Violation]] = defaultdict(list)
                 for v in upstream_violations:
-                    by_ref[(v.ref_desc, v.did_you_mean)].append(v)
+                    by_ref[(v.ref_desc, v.pr_changed_field, v.did_you_mean)].append(v)
 
                 print(f"\n{upstream}")
-                for ref_idx, ((ref_desc, did_you_mean), group) in enumerate(
+                for ref_idx, ((ref_desc, pr_changed_field, did_you_mean), group) in enumerate(
                     sorted(by_ref.items())
                 ):
                     # Extra blank line between multiple broken refs under the
@@ -1156,6 +1187,8 @@ def main() -> int:
                     if ref_idx > 0:
                         print()
                     print(f"      {ref_desc}")
+                    if pr_changed_field:
+                        print(f"      {pr_changed_field}")
                     if did_you_mean:
                         print(f"      {did_you_mean}")
 
