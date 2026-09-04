@@ -895,10 +895,20 @@ def validate(
         # COLUMN-CONTRACT check
         refs = consumed_refs(sql, alias_map)
         for upstream, object_path, field, line_num in refs:
-            if upstream not in contracts:
-                continue  # upstream wasn't changed — skip
+            # Resolve the upstream's contract lazily (memoized) instead of
+            # requiring it to already be in `contracts` (which only holds
+            # models that showed up in `git diff`). Gitignored, auto-generated
+            # models — PolicyWide.sql, *_metrics.sql combiners — NEVER appear
+            # in a git diff, so gating on "upstream in contracts" silently
+            # skipped every consumer of a wide-layer/combiner model, no matter
+            # what changed underneath it. get_contract() always reads the
+            # current file on disk and resolves OBJECT_CONSTRUCT(alias.*)
+            # wildcards against the real upstream, so this closes that gap.
+            contract = contracts.get(upstream) or get_contract(upstream, models, contract_cache)
+            if contract is None:
+                continue  # upstream model doesn't exist / unresolvable — skip
+            contracts.setdefault(upstream, contract)
 
-            contract = contracts[upstream]
             rel_path = str(models[consumer_name].relative_to(CAO_ROOT))
 
             if object_path:
