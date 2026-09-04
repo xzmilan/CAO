@@ -137,16 +137,56 @@ _JINJA_SOURCE_STUB_RE = re.compile(
 _JINJA_THIS_STUB_RE = re.compile(r"\{\{\s*this\s*\}\}")
 _JINJA_GENERIC_RE = re.compile(r"\{\{.*?\}\}", re.DOTALL)
 
+# One-line rule descriptions for the grouped report header — the full
+# "what to do about this" guidance still prints once at the end via
+# print_help_for_rules(); this is just enough context to read a group
+# heading without knowing the rule code by memory.
+_RULE_ONE_LINERS: dict[str, str] = {
+    "NO-STAR-REF": "SELECT * / alias.* over a ref() — explicit column lists required",
+    "COLUMN-CONTRACT": "consumed field no longer exists in its upstream model's contract",
+}
+
+
+def _short_path(rel_path: str) -> str:
+    """
+    Trim the noisy, repeated 'domains/<Domain>/models/' prefix every model
+    path shares, so grouped violation lines read as
+    'view_layer/ChangedAddress.sql:L13' instead of the full
+    'domains/CustomerJourney/models/view_layer/ChangedAddress.sql:L13'
+    repeated on every single line.
+    """
+    normalized = rel_path.replace("\\", "/")
+    marker = "/models/"
+    idx = normalized.find(marker)
+    if idx == -1:
+        return normalized
+    return normalized[idx + len(marker):]
+
 
 # ── Data structures ──────────────────────────────────────────────────────────
 
 class Violation:
-    """A single contract violation."""
-    def __init__(self, file: str, line: int, message: str, rule: str):
+    """
+    A single contract violation.
+
+    `headline` is the short, human-readable root cause shared by every
+    consumer hitting the exact same broken reference (e.g. "SystemIds:
+    RtenPlcyCntrctNum no longer exists in PolicyRaw") — used to GROUP
+    violations so 20 consumers of the same rename print once, not 20 times.
+    `detail` is the optional "available fields / did you mean" tail that's
+    identical across the whole group, so it's also printed once per group
+    instead of once per line.
+    """
+    def __init__(
+        self, file: str, line: int, message: str, rule: str,
+        headline: str | None = None, detail: str = "",
+    ):
         self.file = file
         self.line = line
         self.message = message
         self.rule = rule
+        self.headline = headline if headline is not None else message
+        self.detail = detail
 
 
 class Contract:
@@ -708,6 +748,7 @@ def check_star_refs(sql: str, alias_map: dict[str, str], file_path: str) -> list
                                 f"(CAO doctrine: explicit column lists make downstream "
                                 f"impact verifiable). List the columns.",
                         rule="NO-STAR-REF",
+                        headline=f"{alias}.* over ref('{alias_map[alias]}')",
                     ))
             else:
                 # SELECT * — check if this model has ANY ref()
@@ -719,6 +760,7 @@ def check_star_refs(sql: str, alias_map: dict[str, str], file_path: str) -> list
                                 "(CAO doctrine: explicit column lists make downstream "
                                 "impact verifiable). List the columns.",
                         rule="NO-STAR-REF",
+                        headline="SELECT * in a model with ref()s",
                     ))
 
     return violations
@@ -879,8 +921,13 @@ def validate(
                         )
                     break
 
-    # For each consumer, check its references against changed upstream contracts
-    for consumer_name in consumers:
+    # For each consumer, check its references against changed upstream contracts.
+    # Also check the CHANGED models themselves, not just their downstream
+    # consumers — a changed model can reference its OWN upstream refs (e.g.
+    # NO-STAR-REF on `Alias.*` inside the changed file), and if nothing else
+    # in the repo happens to consume it (a leaf view), `consumers` alone would
+    # never include it and its own violations would go unchecked.
+    for consumer_name in consumers | changed:
         if consumer_name not in models:
             continue
         sql = models[consumer_name].read_text()
@@ -915,11 +962,20 @@ def validate(
                 # Colon ref
                 valid, reason = _resolve_colon_ref(object_path, field, contract, upstream)
                 if not valid:
+                    # Split "field 'X' not found ... (available: [...]) Did you
+                    # mean: Y?" into a short headline (what broke, grouped
+                    # across every consumer) and a detail tail (the available
+                    # list + hint, printed once per group instead of once
+                    # per consumer file).
+                    headline_reason, _, detail_tail = reason.partition(" (available:")
+                    detail = ("(available:" + detail_tail) if detail_tail else ""
                     violations.append(Violation(
                         file=rel_path,
                         line=line_num,
                         message=f"{object_path}:{field} — {upstream} {reason}",
                         rule="COLUMN-CONTRACT",
+                        headline=f"{upstream} {object_path}:{field} — {headline_reason}",
+                        detail=detail,
                     ))
             else:
                 # Plain column ref
@@ -931,6 +987,8 @@ def validate(
                         message=f"{field} — {upstream} no longer publishes column '{field}' "
                                 f"(available: {available})",
                         rule="COLUMN-CONTRACT",
+                        headline=f"{upstream}.{field} — no longer published",
+                        detail=f"(available: {available})",
                     ))
 
     return violations, all_warnings
@@ -990,22 +1048,44 @@ def main() -> int:
         for w in warnings:
             print(f"  {w}")
 
-    # Print violations
+    # Print violations — grouped by rule, then by root cause (headline), so
+    # N consumers hitting the exact same broken rename print as ONE group
+    # with a shared explanation, not N nearly-identical blocks each repeating
+    # the same "available fields" list. This is what actually makes a
+    # 20-violation run readable: the rename happened ONCE, so the report
+    # should say that once too.
     if violations:
-        # Group by file
-        by_file: dict[str, list[Violation]] = defaultdict(list)
-        for v in violations:
-            by_file[v.file].append(v)
-
         print(f"\nVIOLATIONS ({len(violations)} total):\n")
-        for file_path in sorted(by_file):
-            file_violations = by_file[file_path]
-            print(f"  {file_path} ({len(file_violations)} violations):")
-            for v in file_violations:
-                print(f"    L{v.line:04d}  [{v.rule}] {v.message}")
+
+        by_rule: dict[str, list[Violation]] = defaultdict(list)
+        for v in violations:
+            by_rule[v.rule].append(v)
+
+        for rule in sorted(by_rule):
+            rule_violations = by_rule[rule]
+            short_desc = _RULE_ONE_LINERS.get(rule, "")
+            header = f"[{rule}] {short_desc}".rstrip()
+            print(f"{header} — {len(rule_violations)} violation(s)")
+            print("-" * len(header))
+
+            by_headline: dict[str, list[Violation]] = defaultdict(list)
+            for v in rule_violations:
+                by_headline[v.headline].append(v)
+
+            for headline in sorted(by_headline):
+                group = by_headline[headline]
+                print(f"\n  {headline}")
+                if group[0].detail:
+                    print(f"    {group[0].detail}")
+                locations = sorted(
+                    f"{_short_path(v.file)}:L{v.line}" for v in group
+                )
+                for loc in locations:
+                    print(f"      {loc}")
             print()
 
-        print(f"SUMMARY: {len(violations)} violations, {len(warnings)} warnings")
+        print(f"SUMMARY: {len(violations)} violations, {len(warnings)} warnings across "
+              f"{len(set(v.file for v in violations))} file(s)")
         print_help_for_rules({v.rule for v in violations})
         return 1
 
