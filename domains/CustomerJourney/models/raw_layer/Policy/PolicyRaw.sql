@@ -96,7 +96,7 @@ SELECT
     , Policy.SRVD_CHNL_CD AS ServiceChannelCode
     , Policy.AGT_OF_RECRD_NUM AS AgentOfRecordNumber
     , CAST(Policy.PLCY_INCEPT_DT AS DATE) AS PolicyInceptionDate
-    , CAST(Policy.CNCL_DT AS DATE) AS CancellationDate
+    , CAST(Policy.CNCL_DT AS DATE) AS Cancellate
     , PolicyStats.PRIOR_PLCY AS PriorPolicyIndicator
     , COALESCE(LatestTransaction.SourceSystemCode, PolicyStats.SRC_SYS) AS SourceSystemCode
     , LatestTransaction.ZipCode AS ZipCode
