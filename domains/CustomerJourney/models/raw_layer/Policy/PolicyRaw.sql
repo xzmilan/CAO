@@ -89,7 +89,7 @@ SELECT
     BASE64_ENCODE(SHA2(CONCAT_WS('|', Policy.PLCY_CNTRCT_NUM, Policy.BUS_ENTITY, Policy.LOB_TYP_CD), 256)) AS ID
 
     -- 1:1 business attributes — flat top-level columns, no wrapping OBJECT.
-    , Policy.BUS_ENTITY AS BusinessEntit
+    , Policy.BUS_ENTITY AS BusinessEntity
     , Policy.LOB_TYP_CD AS LineOfBusinessCode
     , Policy.PLCY_ST_CD AS PolicyStateCode
     , CAST(Policy.PLCY_CNTRCT_NUM AS VARCHAR) AS PolicyNumber
