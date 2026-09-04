@@ -1146,7 +1146,15 @@ def main() -> int:
                     by_ref[(v.ref_desc, v.did_you_mean)].append(v)
 
                 print(f"\n{upstream}")
-                for (ref_desc, did_you_mean), group in sorted(by_ref.items()):
+                for ref_idx, ((ref_desc, did_you_mean), group) in enumerate(
+                    sorted(by_ref.items())
+                ):
+                    # Extra blank line between multiple broken refs under the
+                    # SAME upstream model (e.g. PolicyRaw breaking two
+                    # different fields) so each one reads as its own block,
+                    # not a run-on continuation of the previous one.
+                    if ref_idx > 0:
+                        print()
                     print(f"      {ref_desc}")
                     if did_you_mean:
                         print(f"      {did_you_mean}")
@@ -1155,18 +1163,20 @@ def main() -> int:
                     for v in group:
                         by_layer[_categorize_layer(_short_path(v.file))].append(v)
 
-                    print(f"\n      This Error Affects The Following Objects")
+                    print()
+                    print("      This Error Affects The Following Objects")
                     for layer in _LAYER_ORDER:
                         layer_violations = by_layer.get(layer)
                         if not layer_violations:
                             continue
+                        print()
                         print(f"      {layer}")
                         entries = sorted(
                             (Path(v.file).name, v.line) for v in layer_violations
                         )
                         for filename, line_num in entries:
                             print(f"               {filename} (Line {line_num})")
-                    print()
+                print()
 
         print(f"SUMMARY: {len(violations)} violations, {len(warnings)} warnings across "
               f"{len(set(v.file for v in violations))} file(s)")
