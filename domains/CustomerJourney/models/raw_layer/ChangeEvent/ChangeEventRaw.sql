@@ -137,7 +137,7 @@ SELECT
     )) AS ID
 
     -- 1:1 event attributes — flat top-level columns, no wrapping OBJECT.
-    , AllEvents.EventType AS EventType
+    , AllEvents.EventType AS EventTypeRenamed
     , CAST(AllEvents.EffectiveDate AS DATE) AS EffectiveDate
     , TO_CHAR(AllEvents.EffectiveDate, 'YYYY-MM') AS EventMonth
     , AllEvents.PreviousZipCode AS PreviousZipCode
@@ -169,7 +169,7 @@ SELECT
         , SRC_TRANS_TMSP VARCHAR
         , SRC_SYS_CD VARCHAR
         , PLCY_NUM VARCHAR
-    ) AS Rten
+    ) AS SystemIds
 
 FROM AllEvents
 LEFT JOIN {{ source('rten', 'rten_xcmpy_pif_tbl') }} AS Policy
